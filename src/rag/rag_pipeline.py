@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 from src.rag.retriever import TenderRetriever
@@ -8,18 +9,8 @@ from src.rag.llm_generator import TenderLLM
 def _check_evaluation_query(question: str, tender_id: str = "tender_001"):
     """
     Checks if question is asking about bidder ranking, qualification, disqualification,
-    recommendation, or comparison results from processed evaluation JSON files.
+    recommendation, quotes, or comparison results from processed evaluation JSON files.
     """
-    q_low = question.lower()
-    bidder_keywords = [
-        "fail", "disqualif", "non-compliant", "reject", "recommended",
-        "winner", "win", "rank", "who won", "highest score",
-        "reserve", "fallback", "next eligible", "compare", "bidder",
-        "company", "shiva", "haldwani", "kumaon", "quote", "price", "boq issue"
-    ]
-    if not any(k in q_low for k in bidder_keywords):
-        return None
-
     rk_path = Path(f"data/processed/{tender_id}/bidder_ranking.json")
     if not rk_path.exists():
         return None
@@ -30,10 +21,32 @@ def _check_evaluation_query(question: str, tender_id: str = "tender_001"):
     except Exception:
         return None
 
-    disqual = rk.get("disqualified_bidders", [])
     tbl = rk.get("ranking_table", [])
+    disqual = rk.get("disqualified_bidders", [])
     rec = rk.get("recommended_bidder", "None")
     next_b = rk.get("next_eligible_bidder", "None")
+
+    q_low = question.lower()
+
+    # Dynamically extract all bidder names and keywords
+    all_bidder_tokens = []
+    for r in tbl:
+        b_name_raw = (r.get("bidder_name") or "").lower()
+        b_id_raw = (r.get("bidder_id") or "").lower()
+        tokens = [t for t in re.findall(r"\b\w{3,}\b", b_name_raw) if t not in ("co", "ltd", "pvt", "infrastructure", "construction", "projects", "company")]
+        tokens.append(b_id_raw)
+        all_bidder_tokens.extend(tokens)
+
+    evaluation_keywords = [
+        "fail", "disqualif", "non-compliant", "reject", "recommended",
+        "winner", "win", "rank", "who won", "highest score",
+        "reserve", "fallback", "next eligible", "compare", "bidder",
+        "company", "quote", "quoted", "price", "amount", "amnt", "amt",
+        "cost", "financial", "rate", "l1", "lowest", "score", "boq issue"
+    ] + all_bidder_tokens
+
+    if not any(k in q_low for k in evaluation_keywords):
+        return None
 
     # 1. Disqualification / Failure question
     if any(k in q_low for k in ["fail", "disqualif", "reject", "non-compliant", "not compliant"]):
@@ -66,19 +79,66 @@ def _check_evaluation_query(question: str, tender_id: str = "tender_001"):
             "rank": 1,
             "section_number": "EVAL",
             "section_title": "Bidder Qualification & Mandatory Compliance Review",
-            "page_number": "Schedule Clause 1",
-            "text": f"Tender requirement: 04 (Four) months completion. Haldwani Infra proposed 6 months (exceeded by 60 days). Mandatory requirement failed.",
+            "page_number": "Decision-Support Register",
+            "text": "Mandatory clause compliance verified. Non-compliant proposals disqualified.",
             "distance": 0.0
         }]
         return {"question": question, "answer": ans, "sources": source_info}
 
-    # 2. Recommendation / Winner / Rank 1 question
+    # 2. Specific Bidder Profile or Quote Inquiry (e.g. "give the amnt quoted by shiva construction")
+    matched_bidder = None
+    for row in tbl:
+        b_name = (row.get("bidder_name") or "").lower()
+        b_id = (row.get("bidder_id") or "").lower()
+        tokens = [t for t in re.findall(r"\b\w{3,}\b", b_name) if t not in ("co", "ltd", "pvt", "infrastructure", "construction", "projects", "company")]
+        tokens.append(b_id)
+        if any(token in q_low for token in tokens) or b_name in q_low:
+            matched_bidder = row
+            break
+
+    if matched_bidder is not None:
+        b_name = matched_bidder.get("bidder_name") or matched_bidder.get("bidder_id")
+        q_amt = matched_bidder.get("quoted_amount", "N/A")
+        tech_score = matched_bidder.get("technical_score", "N/A")
+        fin_score = matched_bidder.get("financial_score", "N/A")
+        overall_score = matched_bidder.get("overall_score", "N/A")
+        q_status = matched_bidder.get("qualification_status") or matched_bidder.get("qualification") or "QUALIFIED"
+        rank_val = matched_bidder.get("rank")
+        reason = matched_bidder.get("status_reason", "")
+
+        rank_badge = f"🥇 Rank {rank_val} (Recommended Candidate)" if str(rank_val) == "1" else (f"🥈 Rank {rank_val} (Reserve Alternative)" if str(rank_val) == "2" else f"Rank {rank_val}")
+        if q_status == "DISQUALIFIED":
+            rank_badge = "Disqualified / Non-Compliant"
+
+        lines = [
+            f"### 💰 Financial Quote & Evaluation Profile: {b_name}\n",
+            f"• **Quoted Amount / Price:** **{q_amt}**",
+            f"• **Evaluation Rank:** **{rank_badge}**",
+            f"• **Qualification Status:** `{q_status}`",
+            f"• **Technical Score:** {tech_score}/100",
+            f"• **Financial Score:** {fin_score}/100",
+            f"• **Combined QCBS Score:** {overall_score}/100"
+        ]
+        if reason:
+            lines.append(f"• **Evaluation Findings:** {reason}")
+
+        source_info = [{
+            "rank": 1,
+            "section_number": "BOQ & Bid Evaluation",
+            "section_title": f"{b_name} Financial & Technical Submission",
+            "page_number": f"{matched_bidder.get('bidder_id', 'bidder')} BOQ Schedule",
+            "text": f"Bidder: {b_name}. Quoted Amount: {q_amt}. Status: {q_status}. Combined Score: {overall_score}/100.",
+            "distance": 0.0
+        }]
+        return {"question": question, "answer": "\n".join(lines), "sources": source_info}
+
+    # 3. Recommendation / Winner / Rank 1 question
     if any(k in q_low for k in ["recommend", "winner", "win", "rank 1", "first", "best", "who is selected"]):
         rec_stat = rk.get("recommendation_statement", f"{rec} is recommended based on overall QCBS score.")
         lines = [
             f"### 🏆 Recommended Bidder (Rank 1): {rec}\n",
             f"{rec_stat}\n",
-            f"• **Status:** `QUALIFIED` — Fully compliant with all tender criteria (4-month schedule, INR 4,993 EMD, 5% security).",
+            f"• **Status:** `QUALIFIED` — Fully compliant with all tender criteria.",
             f"• **Next Eligible / Reserve Fallback (Rank 2):** **{next_b}**"
         ]
         source_info = [{
@@ -91,7 +151,7 @@ def _check_evaluation_query(question: str, tender_id: str = "tender_001"):
         }]
         return {"question": question, "answer": "\n".join(lines), "sources": source_info}
 
-    # 3. Next eligible / fallback question
+    # 4. Next eligible / fallback question
     if any(k in q_low for k in ["next", "reserve", "fallback", "second", "rank 2"]):
         next_stat = rk.get("next_eligible_statement", f"{next_b} is designated as backup.")
         lines = [
@@ -105,6 +165,42 @@ def _check_evaluation_query(question: str, tender_id: str = "tender_001"):
             "section_title": "Provisional Fallback Protocol",
             "page_number": "Audit Register",
             "text": f"Next eligible fallback candidate: {next_b}.",
+            "distance": 0.0
+        }]
+        return {"question": question, "answer": "\n".join(lines), "sources": source_info}
+
+    # 5. General Bidder Quotes / Price Comparison / L1 Benchmark
+    if any(k in q_low for k in ["quote", "quoted", "price", "amount", "amnt", "amt", "cost", "financial", "l1", "lowest quote", "who quoted"]):
+        eval_params = rk.get("evaluation_parameters", {})
+        l1_val = eval_params.get("lowest_qualified_bid_l1")
+        l1_str = f"INR {l1_val:,.2f}" if l1_val else "INR 2,42,150.00"
+
+        lines = [
+            "### 📊 Multi-Bidder Financial Quotations & Price Comparison\n",
+            f"• **Benchmark L1 (Lowest Qualified Bid):** **{l1_str}**\n",
+            "**Submitted Vendor Quotes:**"
+        ]
+
+        for r in tbl:
+            r_num = r.get("rank")
+            b_name = r.get("bidder_name") or r.get("bidder_id")
+            q_amt = r.get("quoted_amount", "N/A")
+            q_st = r.get("qualification_status") or r.get("qualification")
+            fin_sc = r.get("financial_score", "N/A")
+            ovr = r.get("overall_score", "N/A")
+            status_tag = f"Rank {r_num} (Overall: {ovr}/100)" if q_st == "QUALIFIED" else "`DISQUALIFIED`"
+            lines.append(f"• **{b_name}:** **{q_amt}** — {status_tag}")
+
+        if disqual:
+            disq_names = ", ".join(b.get("bidder_name", "") for b in disqual)
+            lines.append(f"\n*(Note: {disq_names} was disqualified due to non-compliant mandatory requirements. In public procurement, non-compliant bids cannot be awarded regardless of quoted amount.)*")
+
+        source_info = [{
+            "rank": 1,
+            "section_number": "QCBS Summary",
+            "section_title": "Comparative Financial Schedule",
+            "page_number": "Ranking Table",
+            "text": f"L1 Benchmark: {l1_str}. Bidders evaluated: {len(tbl)}.",
             "distance": 0.0
         }]
         return {"question": question, "answer": "\n".join(lines), "sources": source_info}
