@@ -1,0 +1,9 @@
+pymupdf
+pandas
+openpyxl
+pytesseract
+pillow
+sentence-transformers
+chromadb
+ollama
+streamlit
