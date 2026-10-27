@@ -1,4 +1,7 @@
-import ollama
+try:
+    import ollama
+except ImportError:
+    ollama = None
 
 
 class RiskExplainer:
@@ -14,6 +17,7 @@ class RiskExplainer:
         """
         Use the local LLM to explain a risk
         already detected by deterministic rules.
+        Falls back to deterministic summary if Ollama service is unavailable.
         """
 
         prompt = f"""
@@ -22,16 +26,16 @@ You are an evidence-grounded construction tender risk analyst.
 A deterministic rule-based system has already detected a risk.
 
 RISK TITLE:
-{risk['title']}
+{risk.get('title', 'Tender Risk')}
 
 CATEGORY:
-{risk['category']}
+{risk.get('category', 'General')}
 
 SEVERITY:
-{risk['severity']}
+{risk.get('severity', 'MEDIUM')}
 
 EXACT TENDER EVIDENCE:
-{risk['evidence']}
+{risk.get('evidence', '')}
 
 Explain the risk strictly from the evidence above.
 
@@ -62,21 +66,38 @@ Potential Impact:
 <brief cautious practical implication based only on the evidence>
 """
 
-        response = ollama.chat(
-            model=self.model_name,
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            options={
-                "temperature": 0
-            }
-        )
+        if ollama is None:
+            return (
+                f"Risk Explanation:\n"
+                f"Tender clause establishes {risk.get('title')}: {risk.get('evidence')}.\n\n"
+                f"Potential Impact:\n"
+                f"{risk.get('description')}"
+            )
 
-        return response[
-            "message"
-        ][
-            "content"
-        ]
+        try:
+            response = ollama.chat(
+                model=self.model_name,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                options={
+                    "temperature": 0
+                }
+            )
+
+            return response[
+                "message"
+            ][
+                "content"
+            ]
+        except Exception:
+            # Resilient fallback when Ollama daemon is offline or model is not loaded
+            return (
+                f"Risk Explanation:\n"
+                f"Tender clause establishes {risk.get('title')}: {risk.get('evidence')}.\n\n"
+                f"Potential Impact:\n"
+                f"{risk.get('description')}"
+            )

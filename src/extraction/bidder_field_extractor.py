@@ -213,28 +213,64 @@ def extract_bidder_fields(
     result = _search_pages(
         pages,
         [
-            # Example:
-            # Total Quoted Bid Amount: INR 4,65,00,000
-            r"(?:total quoted bid amount|"
-            r"total quoted amount|"
-            r"total bid amount|"
-            r"total contract price|"
-            r"total quoted price|"
-            r"grand total|"
-            r"total amount)"
+            # Pattern 1: Label followed by currency then number (e.g. Total Quoted Bid Amount: INR 4,65,00,000 or INR 4.65 crore)
+            r"(?:quoted\s+total(?:\s+lump[\s\-]sum)?\s+amount|"
+            r"total\s+quoted(?:\s+lump[\s\-]sum)?\s+amount|"
+            r"total\s+quoted\s+bid\s+amount|"
+            r"total\s+quoted\s+amount|"
+            r"total\s+bid\s+amount|"
+            r"total\s+contract\s+price|"
+            r"total\s+quoted\s+price|"
+            r"total\s+bid\s+price|"
+            r"total\s+financial\s+quote|"
+            r"quoted\s+bid\s+amount|"
+            r"quoted\s+amount|"
+            r"grand\s+total|"
+            r"total\s+bid|"
+            r"total\s+amount|"
+            r"total\s+price)"
             r"\s*[:\-]?\s*"
             r"(?:INR|Rs\.?|₹)\s*"
-            r"([\d,]+(?:\.\d+)?)",
+            r"([\d,]+(?:\.\d+)?\s*(?:crores?|cr|lakhs?|lac|lacs)?)",
 
-            # Allows small amount of text between
-            # label and currency.
-            r"(?:total quoted bid amount|"
-            r"total quoted amount|"
-            r"total bid amount|"
-            r"total contract price)"
+            # Pattern 2: Label followed by number with crore/lakh notation
+            r"(?:quoted\s+total(?:\s+lump[\s\-]sum)?\s+amount|"
+            r"total\s+quoted(?:\s+lump[\s\-]sum)?\s+amount|"
+            r"total\s+quoted\s+bid\s+amount|"
+            r"total\s+quoted\s+amount|"
+            r"total\s+bid\s+amount|"
+            r"total\s+contract\s+price|"
+            r"total\s+quoted\s+price|"
+            r"total\s+financial\s+quote|"
+            r"grand\s+total|"
+            r"total\s+bid|"
+            r"total\s+amount)"
+            r"\s*[:\-]?\s*"
+            r"([\d,]+(?:\.\d+)?\s*(?:crores?|cr|lakhs?|lac|lacs))\b",
+
+            # Pattern 3: Label followed by number and trailing currency or /-
+            r"(?:quoted\s+total(?:\s+lump[\s\-]sum)?\s+amount|"
+            r"total\s+quoted(?:\s+lump[\s\-]sum)?\s+amount|"
+            r"total\s+quoted\s+bid\s+amount|"
+            r"total\s+quoted\s+amount|"
+            r"total\s+bid\s+amount|"
+            r"total\s+contract\s+price|"
+            r"total\s+quoted\s+price|"
+            r"grand\s+total|"
+            r"total\s+amount)"
+            r"\s*[:\-]?\s*"
+            r"([\d,]+(?:\.\d+)?)\s*(?:INR|Rs\.?|₹|/\-)",
+
+            # Pattern 4: Allows small interstitial text
+            r"(?:quoted\s+total(?:\s+lump[\s\-]sum)?\s+amount|"
+            r"total\s+quoted(?:\s+lump[\s\-]sum)?\s+amount|"
+            r"total\s+quoted\s+bid\s+amount|"
+            r"total\s+quoted\s+amount|"
+            r"total\s+bid\s+amount|"
+            r"total\s+contract\s+price)"
             r".{0,80}?"
             r"(?:INR|Rs\.?|₹)\s*"
-            r"([\d,]+(?:\.\d+)?)"
+            r"([\d,]+(?:\.\d+)?\s*(?:crores?|cr|lakhs?|lac|lacs)?)"
         ]
     )
 
@@ -242,8 +278,16 @@ def extract_bidder_fields(
 
         value, page, evidence = result
 
+        # Ensure consistent formatting without duplicate currency prefixes
+        value_clean = re.sub(
+            r"^(?:INR|Rs\.?|₹)\s*",
+            "",
+            value.strip(),
+            flags=re.IGNORECASE
+        )
+
         fields["total_quoted_amount"] = _create_field(
-            f"INR {value}",
+            f"INR {value_clean}",
             page,
             evidence
         )

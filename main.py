@@ -1,777 +1,329 @@
 import json
+import sys
 from pathlib import Path
-
 
 from src.ingestion.file_loader import (
     find_tender_files,
-    find_bidder_files
+    find_bidder_files,
+    find_all_bidder_folders,
+    load_bidder_names
 )
+from src.extraction.pdf_extractor import extract_pdf
+from src.extraction.section_detector import detect_sections
+from src.extraction.field_extractor import extract_tender_fields
+from src.extraction.bidder_field_extractor import extract_bidder_fields
+from src.boq.boq_extractor import extract_boq
+from src.boq.boq_validator import validate_boq
+from src.rag.chunker import create_section_chunks
+from src.rag.embedding_store import TenderVectorStore
+from src.comparison.bid_comparator import compare_bids
+from src.comparison.recommendation import generate_recommendation
+from src.comparison.bidder_ranker import BidderRanker, save_ranking_results
 
-
-from src.extraction.pdf_extractor import (
-    extract_pdf
-)
-
-
-from src.extraction.section_detector import (
-    detect_sections
-)
-
-
-from src.extraction.field_extractor import (
-    extract_tender_fields
-)
-
-
-from src.extraction.bidder_field_extractor import (
-    extract_bidder_fields
-)
-
-
-from src.boq.boq_extractor import (
-    extract_boq
-)
-
-
-from src.boq.boq_validator import (
-    validate_boq
-)
-
-
-from src.rag.chunker import (
-    create_section_chunks
-)
-
-
-from src.rag.embedding_store import (
-    TenderVectorStore
-)
-
-
-from src.comparison.bid_comparator import (
-    compare_bids
-)
-from src.comparison.recommendation import (
-    generate_recommendation
-)
+# Ensure UTF-8 output on Windows console
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
 
-RAW_FOLDER = Path(
-    "data/raw/tender_001"
-)
+RAW_FOLDER = Path("data/raw/tender_001")
+TENDER_FOLDER = RAW_FOLDER / "tender"
+OUTPUT_FOLDER = Path("data/processed/tender_001")
 
+OUTPUT_FOLDER.mkdir(parents=True, exist_ok=True)
 
-TENDER_FOLDER = (
-    RAW_FOLDER / "tender"
-)
+# Load bidder names dictionary if present
+names_file = RAW_FOLDER / "bidder_names.json"
+names = load_bidder_names(names_file)
 
-
-BIDDER_A_FOLDER = (
-    RAW_FOLDER / "bidder_A"
-)
-
-
-BIDDER_B_FOLDER = (
-    RAW_FOLDER / "bidder_B"
-)
-
-
-OUTPUT_FOLDER = Path(
-    "data/processed/tender_001"
-)
-
-
-OUTPUT_FOLDER.mkdir(
-    parents=True,
-    exist_ok=True
-)
-
-
-# ============================================================
-# LOAD BIDDER NAMES
-# ============================================================
-
-names_file = (
-    RAW_FOLDER
-    / "bidder_names.json"
-)
-
-
-bidder_a_name = "Bidder A"
-bidder_b_name = "Bidder B"
-
-
-if names_file.exists():
-
-    with open(
-        names_file,
-        "r",
-        encoding="utf-8"
-    ) as file:
-
-        names = json.load(
-            file
-        )
-
-
-    bidder_a_name = names.get(
-        "bidder_A",
-        "Bidder A"
-    )
-
-
-    bidder_b_name = names.get(
-        "bidder_B",
-        "Bidder B"
-    )
-
-
-print(
-    "\n============================================================"
-)
-
-print(
-    "TENDER AND BID ANALYSIS"
-)
-
-print(
-    "============================================================"
-)
-
+print("\n============================================================")
+print("TENDER AND MULTI-BIDDER EVALUATION PIPELINE")
+print("============================================================")
 
 # ============================================================
 # PROCESS COMMON TENDER
 # ============================================================
 
-print(
-    "\nProcessing common Tender..."
-)
+print("\nProcessing common Tender document...")
 
-
-tender_files = find_tender_files(
-    TENDER_FOLDER
-)
-
+tender_files = find_tender_files(TENDER_FOLDER)
 
 if not tender_files["pdf_files"]:
+    print("Raw tender PDF not found in data/raw/tender_001/tender.")
+    if (OUTPUT_FOLDER / "tender.json").exists():
+        print("Loading baseline tender dataset from processed repository...")
+        with open(OUTPUT_FOLDER / "tender.json", "r", encoding="utf-8") as file:
+            tender_data = json.load(file)
+    else:
+        raise FileNotFoundError("Tender PDF not found and no processed tender.json available.")
+else:
+    tender_pdf = tender_files["pdf_files"][0]
+    print("Tender PDF:", tender_pdf.name)
 
-    raise FileNotFoundError(
-        "Tender PDF not found."
-    )
+    # 1. Extract Tender PDF
+    tender_data = extract_pdf(tender_pdf)
 
+    # 2. Detect Tender Sections
+    tender_data["sections"] = detect_sections(tender_data["pages"])
 
-tender_pdf = (
-    tender_files["pdf_files"][0]
-)
+    # 3. Extract Tender Fields
+    tender_data["tender_fields"] = extract_tender_fields(tender_data)
 
+    # ============================================================
+    # CREATE & STORE RAG CHUNKS
+    # ============================================================
 
-print(
-    "Tender PDF:",
-    tender_pdf.name
-)
-
-
-# ------------------------------------------------------------
-# Extract Tender PDF
-# ------------------------------------------------------------
-
-tender_data = extract_pdf(
-    tender_pdf
-)
-
-
-# ------------------------------------------------------------
-# Detect Tender Sections
-# ------------------------------------------------------------
-
-tender_data["sections"] = detect_sections(
-    tender_data["pages"]
-)
-
-
-# ------------------------------------------------------------
-# Extract Tender Fields
-# ------------------------------------------------------------
-
-tender_data["tender_fields"] = (
-    extract_tender_fields(
-        tender_data
-    )
-)
-
-
-# ============================================================
-# CREATE RAG CHUNKS
-# ============================================================
-
-tender_data["rag_chunks"] = (
-    create_section_chunks(
+    tender_data["rag_chunks"] = create_section_chunks(
         tender_data,
         tender_id="tender_001"
     )
-)
 
+    print(f"RAG chunks created: {len(tender_data['rag_chunks'])}")
+    print("Updating RAG vector database (ChromaDB)...")
 
-print(
-    f"RAG chunks created: "
-    f"{len(tender_data['rag_chunks'])}"
-)
+    vector_store = TenderVectorStore()
 
+    try:
+        vector_store.delete(where={"tender_id": "tender_001"})
+        print("Previous tender chunks removed from ChromaDB.")
+    except Exception as error:
+        print("Collection reset:", str(error))
 
-# ============================================================
-# STORE RAG CHUNKS IN CHROMADB
-# ============================================================
+    vector_store.add_chunks(tender_data["rag_chunks"])
+    print("RAG chunks stored. Total chunks in store:", vector_store.count())
 
-print(
-    "Updating RAG vector database..."
-)
+    # Save Tender JSON
+    tender_output = OUTPUT_FOLDER / "tender.json"
+    with open(tender_output, "w", encoding="utf-8") as file:
+        json.dump(tender_data, file, indent=4, ensure_ascii=False)
 
-
-vector_store = TenderVectorStore()
-
-
-# ------------------------------------------------------------
-# Delete old chunks for this tender
-# ------------------------------------------------------------
-
-try:
-
-    vector_store.collection.delete(
-        where={
-            "tender_id": "tender_001"
-        }
-    )
-
-    print(
-        "Old tender chunks removed from ChromaDB."
-    )
-
-except Exception as error:
-
-    print(
-        "No previous tender chunks removed "
-        "or collection was empty."
-    )
-
-    print(
-        "Chroma message:",
-        str(error)
-    )
-
-
-# ------------------------------------------------------------
-# Add newly generated chunks
-# ------------------------------------------------------------
-
-vector_store.add_chunks(
-    tender_data["rag_chunks"]
-)
-
-
-print(
-    "RAG chunks stored in ChromaDB."
-)
-
-
-print(
-    "Current Chroma chunk count:",
-    vector_store.collection.count()
-)
-
-
-# ============================================================
-# SAVE TENDER JSON
-# ============================================================
-
-tender_output = (
-    OUTPUT_FOLDER
-    / "tender.json"
-)
-
-
-with open(
-    tender_output,
-    "w",
-    encoding="utf-8"
-) as file:
-
-    json.dump(
-        tender_data,
-        file,
-        indent=4,
-        ensure_ascii=False
-    )
-
-
-print(
-    "Tender PDF processing completed."
-)
-
+    print("Tender PDF processing completed.")
 
 # ============================================================
 # PROCESS TENDER BOQ
 # ============================================================
 
-print(
-    "\nProcessing Tender BOQ..."
-)
+print("\nProcessing Tender BOQ...")
 
+if tender_files["excel_files"]:
+    tender_boq_path = tender_files["excel_files"][0]
+    print("Tender BOQ:", tender_boq_path.name)
+    tender_boq_df = extract_boq(tender_boq_path)
+    tender_boq_validation = validate_boq(tender_boq_df)
 
-if not tender_files["excel_files"]:
-
-    raise FileNotFoundError(
-        "Tender BOQ not found."
-    )
-
-
-tender_boq_path = (
-    tender_files["excel_files"][0]
-)
-
-
-print(
-    "Tender BOQ:",
-    tender_boq_path.name
-)
-
-
-tender_boq_df = extract_boq(
-    tender_boq_path
-)
-
-
-tender_boq_validation = (
-    validate_boq(
-        tender_boq_df
-    )
-)
-
-
-tender_boq_output = (
-    OUTPUT_FOLDER
-    / "tender_boq.json"
-)
-
-
-with open(
-    tender_boq_output,
-    "w",
-    encoding="utf-8"
-) as file:
-
-    json.dump(
-        tender_boq_validation,
-        file,
-        indent=4,
-        ensure_ascii=False,
-        default=str
-    )
-
-
-print(
-    "Tender BOQ processing completed."
-)
-
+    tender_boq_output = OUTPUT_FOLDER / "tender_boq.json"
+    with open(tender_boq_output, "w", encoding="utf-8") as file:
+        json.dump(tender_boq_validation, file, indent=4, ensure_ascii=False, default=str)
+    print("Tender BOQ processing completed.")
+elif (OUTPUT_FOLDER / "tender_boq.json").exists():
+    print("Loaded tender BOQ baseline from processed repository.")
+else:
+    print("Notice: Tender BOQ Excel file not found.")
 
 # ============================================================
-# FUNCTION TO PROCESS BIDDER
+# FUNCTION TO PROCESS AN INDIVIDUAL BIDDER
 # ============================================================
 
-def process_bidder(
-    bidder_folder,
-    bidder_name,
-    bidder_id
-):
+def process_bidder(bidder_folder, bidder_name, bidder_id):
+    print(f"\nProcessing {bidder_name} ({bidder_id})...")
 
-    print(
-        f"\nProcessing {bidder_name}..."
-    )
-
-
-    files = find_bidder_files(
-        bidder_folder
-    )
-
+    files = find_bidder_files(bidder_folder)
 
     if not files["pdf_files"]:
+        raise FileNotFoundError(f"No PDF documents found for {bidder_name} in {bidder_folder}")
 
-        raise FileNotFoundError(
-            f"No PDF documents found for "
-            f"{bidder_name}."
-        )
-
-
-    # --------------------------------------------------------
-    # Combine PDF information
-    # --------------------------------------------------------
-
+    # Combine all PDF documents submitted by this bidder
     combined_pages = []
-
-
     for pdf_path in files["pdf_files"]:
-
-        print(
-            f"Processing PDF: "
-            f"{pdf_path.name}"
-        )
-
-
-        pdf_data = extract_pdf(
-            pdf_path
-        )
-
-
+        print(f"  • Reading PDF: {pdf_path.name}")
+        pdf_data = extract_pdf(pdf_path)
         for page in pdf_data["pages"]:
-
             page_copy = dict(page)
-
-
-            page_copy["source_file"] = (
-                pdf_path.name
-            )
-
-
-            combined_pages.append(
-                page_copy
-            )
-
+            page_copy["source_file"] = pdf_path.name
+            combined_pages.append(page_copy)
 
     combined_pdf_data = {
-
-        "file_name":
-            f"{bidder_id}_documents",
-
-        "total_pages":
-            len(combined_pages),
-
-        "pages":
-            combined_pages
+        "file_name": f"{bidder_id}_documents",
+        "total_pages": len(combined_pages),
+        "pages": combined_pages
     }
 
+    # Extract Bidder Fields
+    bidder_fields = extract_bidder_fields(combined_pdf_data, bidder_name)
 
-    # --------------------------------------------------------
-    # Extract bidder fields
-    # --------------------------------------------------------
-
-    bidder_fields = extract_bidder_fields(
-        combined_pdf_data,
-        bidder_name
-    )
-
-
-    # --------------------------------------------------------
-    # Process bidder BOQ
-    # --------------------------------------------------------
-
+    # Process Bidder BOQ
     boq_validation = []
-
-
     if files["excel_files"]:
-
-        boq_path = (
-            files["excel_files"][0]
-        )
-
-
-        print(
-            f"Processing BOQ: "
-            f"{boq_path.name}"
-        )
-
-
-        boq_df = extract_boq(
-            boq_path
-        )
-
-
-        boq_validation = validate_boq(
-            boq_df
-        )
-
-
-    # --------------------------------------------------------
-    # Save bidder data
-    # --------------------------------------------------------
+        boq_path = files["excel_files"][0]
+        print(f"  • Reading BOQ: {boq_path.name}")
+        boq_df = extract_boq(boq_path)
+        boq_validation = validate_boq(boq_df)
 
     bidder_data = {
-
-        "bidder_id":
-            bidder_id,
-
-        "bidder_name":
-            bidder_name,
-
-        "total_pages":
-            len(combined_pages),
-
-        "bidder_fields":
-            bidder_fields,
-
-        "boq_validation":
-            boq_validation
+        "bidder_id": bidder_id,
+        "bidder_name": bidder_name,
+        "total_pages": len(combined_pages),
+        "bidder_fields": bidder_fields,
+        "boq_validation": boq_validation
     }
 
+    output_file = OUTPUT_FOLDER / f"{bidder_id}.json"
+    with open(output_file, "w", encoding="utf-8") as file:
+        json.dump(bidder_data, file, indent=4, ensure_ascii=False, default=str)
 
-    output_file = (
-        OUTPUT_FOLDER
-        / f"{bidder_id}.json"
-    )
-
-
-    with open(
-        output_file,
-        "w",
-        encoding="utf-8"
-    ) as file:
-
-        json.dump(
-            bidder_data,
-            file,
-            indent=4,
-            ensure_ascii=False,
-            default=str
-        )
-
-
-    print(
-        f"{bidder_name} processing completed."
-    )
-
-
+    print(f"{bidder_name} processing completed.")
     return bidder_data
 
 
 # ============================================================
-# PROCESS BIDDER A
+# DYNAMIC MULTI-BIDDER DISCOVERY & PROCESSING
 # ============================================================
 
-bidder_a_data = process_bidder(
-    BIDDER_A_FOLDER,
-    bidder_a_name,
-    "bidder_A"
-)
+bidder_folders = find_all_bidder_folders(RAW_FOLDER)
 
+# Fallback: check standard folders if discover returns empty
+if not bidder_folders:
+    candidate_folders = [RAW_FOLDER / "bidder_A", RAW_FOLDER / "bidder_B"]
+    bidder_folders = [f for f in candidate_folders if f.exists()]
+
+all_bidders_data = []
+
+has_raw_bidders = any(
+    find_bidder_files(f).get("pdf_files") for f in bidder_folders
+) if bidder_folders else False
+
+if has_raw_bidders:
+    print(f"\nDiscovered {len(bidder_folders)} bidder folder(s): {[f.name for f in bidder_folders]}")
+    for b_folder in bidder_folders:
+        b_id = b_folder.name
+        b_name = names.get(b_id, b_id.replace("_", " ").title())
+        b_data = process_bidder(b_folder, b_name, b_id)
+        all_bidders_data.append(b_data)
+else:
+    print("\nRaw bidder documents not found in data/raw. Loading processed bidder submissions...")
+    for b_file in sorted(OUTPUT_FOLDER.glob("bidder_*.json"), key=lambda p: p.name):
+        if b_file.name == "bidder_ranking.json":
+            continue
+        with open(b_file, "r", encoding="utf-8") as f:
+            b_json = json.load(f)
+            all_bidders_data.append(b_json)
+    print(f"Loaded {len(all_bidders_data)} bidder submission(s): {[b.get('bidder_name') for b in all_bidders_data]}")
+
+if not all_bidders_data:
+    raise FileNotFoundError("No bidder submissions found in raw or processed folders.")
 
 # ============================================================
-# PROCESS BIDDER B
+# MULTI-BIDDER COMPLIANCE COMPARISON
 # ============================================================
 
-bidder_b_data = process_bidder(
-    BIDDER_B_FOLDER,
-    bidder_b_name,
-    "bidder_B"
-)
-
-
-# ============================================================
-# BIDDER COMPARISON
-# ============================================================
-
-print(
-    "\nProcessing Bid Comparison..."
-)
-
+print("\nProcessing Multi-Bidder Comparison against Baseline...")
 
 comparison_result = compare_bids(
-
-    tender_data[
-        "tender_fields"
-    ],
-
-    bidder_a_data[
-        "bidder_fields"
-    ],
-
-    bidder_b_data[
-        "bidder_fields"
-    ],
-
-    bidder_a_name,
-
-    bidder_b_name
+    tender_data["tender_fields"],
+    all_bidders_data
 )
+
+# ============================================================
+# BIDDER RANKING & QUALIFICATION (Priorities 6-13)
+# ============================================================
+
+print("\nProcessing Dynamic Multi-Bidder Qualification and Ranking...")
+
+boq_evaluations = {}
+for b in all_bidders_data:
+    b_id = b.get("bidder_id")
+    b_boq = b.get("boq_validation", [])
+    boq_evaluations[b_id] = {
+        "summary": {
+            "total_items": len(b_boq),
+            "missing_rates": sum(1 for itm in b_boq if "Missing Rate" in itm.get("issues", [])),
+            "fatal_anomalies": sum(1 for itm in b_boq if str(itm.get("status", "")).upper() == "ERROR")
+        }
+    }
+
+ranker = BidderRanker()
+ranking_result = ranker.rank_bidders(
+    tender_fields=tender_data["tender_fields"],
+    bidders_list=all_bidders_data,
+    boq_evaluations=boq_evaluations
+)
+
+ranking_output = OUTPUT_FOLDER / "bidder_ranking.json"
+save_ranking_results(ranking_result, str(ranking_output))
+print(f"Saved bidder ranking results to: {ranking_output.name}")
+
 # ============================================================
 # GENERATE BIDDER RECOMMENDATION
 # ============================================================
 
 recommendation_result = generate_recommendation(
-    comparison_result,
-    bidder_a_name,
-    bidder_b_name
+    comparison_result
 )
 
+# Align recommendation with dynamic ranker if qualified bidders exist
+if ranking_result.get("recommended_bidder"):
+    comparison_result["recommended_bidder"] = ranking_result["recommended_bidder"]
+    comparison_result["recommendation"] = ranking_result["recommendation_statement"]
+    comparison_result["next_eligible_bidder"] = ranking_result.get("next_eligible_bidder")
+else:
+    comparison_result["recommended_bidder"] = recommendation_result["recommended_bidder"]
+    comparison_result["recommendation"] = recommendation_result["recommendation"]
+    comparison_result["next_eligible_bidder"] = recommendation_result.get("next_eligible_bidder")
 
-comparison_result["recommended_bidder"] = (
-    recommendation_result[
-        "recommended_bidder"
-    ]
-)
+comparison_result["recommendation_details"] = recommendation_result
+comparison_result["ranking_summary"] = ranking_result
 
-
-comparison_result["recommendation"] = (
-    recommendation_result[
-        "recommendation"
-    ]
-)
-
-
-comparison_result["recommendation_details"] = (
-    recommendation_result
-)
-
-comparison_output = (
-    OUTPUT_FOLDER
-    / "bid_comparison.json"
-)
-
-
-with open(
-    comparison_output,
-    "w",
-    encoding="utf-8"
-) as file:
-
-    json.dump(
-        comparison_result,
-        file,
-        indent=4,
-        ensure_ascii=False
-    )
-
+# Save bid_comparison.json
+comparison_output = OUTPUT_FOLDER / "bid_comparison.json"
+with open(comparison_output, "w", encoding="utf-8") as file:
+    json.dump(comparison_result, file, indent=4, ensure_ascii=False)
 
 # ============================================================
 # DISPLAY SUMMARY
 # ============================================================
 
-summary = comparison_result[
-    "summary"
-]
+summary = comparison_result["summary"]
 
+print("\n============================================================")
+print("BIDDER EVALUATION SUMMARY")
+print("============================================================")
+print("Requirements Evaluated:", summary["fields_compared"])
 
-print(
-    "\n============================================================"
-)
+for b_id, b_info in summary.get("bidders", {}).items():
+    print(f"{b_info['name']}: {b_info['compliant']} Compliant / {b_info['non_compliant']} Non-Compliant")
 
-print(
-    "BID COMPARISON"
-)
+print("\nRequirement Comparison Matrix:")
+print("------------------------------------------------------------")
+for item in comparison_result["field_comparisons"]:
+    print(f"\nRequirement: {item['field'].replace('_', ' ').title()}")
+    print("  Tender Baseline:", item["tender_requirement"])
+    for b_id, b_resp in item.get("bidders", {}).items():
+        name = summary.get("bidders", {}).get(b_id, {}).get("name", b_id)
+        print(f"  {name}: {b_resp['value']} | Status: {b_resp['status']}")
 
-print(
-    "============================================================"
-)
+print("\nSubstantive Differences:")
+print("------------------------------------------------------------")
+for diff in comparison_result.get("differences", []):
+    print(f"• {diff['field'].replace('_', ' ').title()} ({diff['impact']}): {diff['message']}")
 
+print("\n============================================================")
+print("BIDDER RANKING & EVALUATION TABLE")
+print("============================================================")
+params = ranking_result["evaluation_parameters"]
+print(f"Methodology: Technical Weight = {params['technical_weight_percent']}, Financial Weight = {params['financial_weight_percent']}")
+print(f"Mandatory Tech Cutoff = {params['min_technical_score']} marks | L1 Lowest Qualified Quote = INR {params['lowest_qualified_bid_l1']:,.0f}" if params['lowest_qualified_bid_l1'] else "")
+print("------------------------------------------------------------")
+for row in ranking_result["ranking_table"]:
+    print(f"Rank {row['rank']:<2}: {row['bidder_name']:<35} | Status: {row['qualification']:<12} | "
+          f"Tech: {row['technical_score']} | Quote: {row['quoted_amount']} | "
+          f"Fin Score: {row['financial_score']} | Overall: {row['overall_score']}")
 
-print(
-    "Fields Compared:",
-    summary[
-        "fields_compared"
-    ]
-)
-
-
-print(
-    f"{bidder_a_name} Compliant:",
-    summary[
-        "bidder_a_compliant"
-    ]
-)
-
-
-print(
-    f"{bidder_b_name} Compliant:",
-    summary[
-        "bidder_b_compliant"
-    ]
-)
-
-
-print(
-    "\nRequirement Comparison"
-)
-
-
-print(
-    "------------------------------------------------------------"
-)
-
-
-for item in comparison_result[
-    "field_comparisons"
-]:
-
-    print(
-        f"\nField: {item['field']}"
-    )
-
-
-    print(
-        "Tender Requirement:",
-        item["tender_requirement"]
-    )
-
-
-    print(
-        f"{bidder_a_name}:",
-        item["bidder_a_value"],
-        "|",
-        item["bidder_a_status"]
-    )
-
-
-    print(
-        f"{bidder_b_name}:",
-        item["bidder_b_value"],
-        "|",
-        item["bidder_b_status"]
-    )
-
-
-print(
-    "\nImportant Differences"
-)
-
-
-print(
-    "------------------------------------------------------------"
-)
-
-
-for item in comparison_result[
-    "differences"
-]:
-
-    print(
-        f"\nField: {item['field']}"
-    )
-
-
-    print(
-        "Impact:",
-        item["impact"]
-    )
-
-
-    print(
-        "Analysis:",
-        item["message"]
-    )
-
-
-# ============================================================
-# END
-# ============================================================
-
-print(
-    "\n============================================================"
-)
-
-print(
-    "All tender and bidder processing steps completed successfully."
-)
-
-print(
-    "============================================================"
-)
+print("\n============================================================")
+print("PROVISIONAL DECISION-SUPPORT RECOMMENDATION")
+print("============================================================")
+print("Recommended Bidder (Rank 1):", ranking_result.get("recommended_bidder") or recommendation_result["recommended_bidder"])
+print("Next Eligible Bidder (Rank 2):", ranking_result.get("next_eligible_bidder") or recommendation_result.get("next_eligible_bidder", "None"))
+print("Recommendation Statement:\n", ranking_result.get("recommendation_statement") or recommendation_result["recommendation"])
+print("============================================================\n")

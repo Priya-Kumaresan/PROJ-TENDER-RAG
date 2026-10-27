@@ -40,15 +40,34 @@ def normalize_currency(value):
     if value is None:
         return None
 
-    text = str(value).strip()
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    text = str(value).strip().lower()
+
+    # Check for Indian crore / cr notation (1 crore = 10,000,000)
+    crore_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:crores?|cr)\b", text)
+    if crore_match:
+        try:
+            return float(crore_match.group(1)) * 10000000.0
+        except ValueError:
+            pass
+
+    # Check for Indian lakh / lac notation (1 lakh = 100,000)
+    lakh_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:lakhs?|lacs?|lac)\b", text)
+    if lakh_match:
+        try:
+            return float(lakh_match.group(1)) * 100000.0
+        except ValueError:
+            pass
 
     text = re.sub(
-        r"(?i)(inr|rs\.?|₹)",
+        r"(?i)(inr|rs\.?|₹|\$|€|£)",
         "",
         text
     )
 
-    text = text.replace(",", "").strip()
+    text = text.replace(",", "").replace("/-", "").strip()
 
     try:
         return float(text)
@@ -65,7 +84,7 @@ def normalize_duration(value):
     text = str(value).strip().lower()
 
     match = re.search(
-        r"(\d+(?:\.\d+)?)\s*"
+        r"(\d+(?:\.\d+)?)\s*(?:\([a-zA-Z]+\))?\s*"
         r"(days?|weeks?|months?|years?)",
         text
     )
