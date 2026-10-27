@@ -18,13 +18,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnClearData = document.getElementById('btnClearData');
   const emptyStateBanner = document.getElementById('emptyStateBanner');
   const btnEmptyUpload = document.getElementById('btnEmptyUpload');
-  const btnEmptySample = document.getElementById('btnEmptySample');
 
   // Upload Drawer Elements
   const uploadDrawer = document.getElementById('uploadDrawer');
   const btnOpenDrawer = document.getElementById('btnOpenDrawer');
   const btnCloseDrawer = document.getElementById('btnCloseDrawer');
-  const btnLoadSample = document.getElementById('btnLoadSample');
+  const numBiddersSelect = document.getElementById('numBiddersSelect');
   const uploadForm = document.getElementById('uploadForm');
   const drawerBiddersContainer = document.getElementById('drawerBiddersContainer');
 
@@ -113,7 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ============================================================
-  // DRAWER TOGGLE & POPULATION
+  // DRAWER TOGGLE & DYNAMIC BIDDER FORM
   // ============================================================
   function openDrawer() {
     uploadDrawer.classList.add('open');
@@ -126,37 +125,56 @@ document.addEventListener('DOMContentLoaded', () => {
   if (btnOpenDrawer) btnOpenDrawer.addEventListener('click', openDrawer);
   if (btnCloseDrawer) btnCloseDrawer.addEventListener('click', closeDrawer);
   if (btnEmptyUpload) btnEmptyUpload.addEventListener('click', openDrawer);
-  if (btnEmptySample) btnEmptySample.addEventListener('click', () => {
-    if (btnLoadSample) btnLoadSample.click();
-  });
 
-  function renderDrawerBidders() {
+  // Render dynamic bidder forms based on user-selected count (default = 2)
+  function renderDrawerBidders(count = 2) {
     if (!drawerBiddersContainer) return;
-    const bidders = [
-      { id: 'bidder_A', defaultName: 'Shiva Construction Co.' },
-      { id: 'bidder_B', defaultName: 'Haldwani Infrastructure Pvt Ltd' },
-      { id: 'bidder_C', defaultName: 'Kumaon Buildcon Projects' }
-    ];
+    const bidders = [];
+    for (let i = 0; i < count; i++) {
+      const letter = String.fromCharCode(65 + i);
+      bidders.push({
+        id: `bidder_${letter}`,
+        letter: letter,
+        num: i + 1
+      });
+    }
 
-    drawerBiddersContainer.innerHTML = bidders.map((b, idx) => `
-      <div style="background: rgba(15, 23, 42, 0.6); padding: 10px; border-radius: var(--radius-sm); margin-bottom: 8px; border: 1px solid var(--border);">
-        <div style="font-size: 12px; font-weight: 600; color: var(--accent); margin-bottom: 6px;">Bidder ${idx + 1} (${b.id})</div>
+    drawerBiddersContainer.innerHTML = bidders.map(b => `
+      <div style="background: rgba(15, 23, 42, 0.6); padding: 12px; border-radius: var(--radius-sm); margin-bottom: 10px; border: 1px solid var(--border);">
+        <div style="font-size: 12px; font-weight: 700; color: var(--accent); margin-bottom: 8px; display: flex; justify-content: space-between;">
+          <span>Bidder ${b.num} (${b.id})</span>
+          <span style="font-size: 11px; color: var(--text-muted);">Vendor Submission</span>
+        </div>
         <div class="file-input-wrapper">
           <label>Company Legal Name:</label>
-          <input type="text" class="input" id="upBidderName_${b.id}" value="${b.defaultName}">
+          <input type="text" class="input" id="upBidderName_${b.id}" placeholder="e.g. Bidder ${b.letter} (or enter company name)" value="">
         </div>
         <div class="file-input-wrapper">
-          <label>Technical Bid (PDF):</label>
-          <input type="file" class="input" id="upBidderPdf_${b.id}" accept=".pdf">
+          <label>Technical Bid (PDF): <span style="color: #f87171;">*</span></label>
+          <input type="file" class="input" id="upBidderTech_${b.id}" accept=".pdf" required>
         </div>
         <div class="file-input-wrapper">
-          <label>Financial BOQ (Excel):</label>
-          <input type="file" class="input" id="upBidderBoq_${b.id}" accept=".xlsx,.xls">
+          <label>Financial Bid (PDF): <span style="font-size: 10px; color: var(--text-muted);">(Optional)</span></label>
+          <input type="file" class="input" id="upBidderFin_${b.id}" accept=".pdf">
+        </div>
+        <div class="file-input-wrapper">
+          <label>Financial BOQ (Excel): <span style="color: #f87171;">*</span></label>
+          <input type="file" class="input" id="upBidderBoq_${b.id}" accept=".xlsx,.xls" required>
         </div>
       </div>
     `).join('');
   }
-  renderDrawerBidders();
+
+  // Handle number of bidders change
+  if (numBiddersSelect) {
+    numBiddersSelect.addEventListener('change', () => {
+      const count = parseInt(numBiddersSelect.value, 10) || 2;
+      renderDrawerBidders(count);
+    });
+  }
+
+  // Initialize drawer with default 2 bidders
+  renderDrawerBidders(2);
 
   // ============================================================
   // FETCH & RENDER DASHBOARD DATA
@@ -256,7 +274,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!tbody) return;
 
     if (!hasData) {
-      tbody.innerHTML = `<tr><td colspan="3" style="text-align: center; color: var(--text-muted); padding: 24px;">No tender specifications loaded. Upload your tender files or load the BSNL sample.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="3" style="text-align: center; color: var(--text-muted); padding: 24px;">No tender specifications loaded. Upload your tender files to begin evaluation.</td></tr>`;
       return;
     }
 
@@ -849,38 +867,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // ============================================================
-  // SAMPLE DATASET 1-CLICK LOADER
-  // ============================================================
-  if (btnLoadSample) {
-    btnLoadSample.addEventListener('click', async () => {
-      btnLoadSample.disabled = true;
-      btnLoadSample.innerHTML = `<span>⏳ Evaluating BSNL Benchmark...</span>`;
-      connectionBadge.textContent = '⏳ Processing Pipeline...';
-      connectionBadge.className = 'badge badge-warning';
-
-      try {
-        const res = await fetch('/api/load-sample', { method: 'POST' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}: Pipeline execution error`);
-
-        alert('BSNL Benchmark Dataset loaded and evaluated successfully!');
-        await loadDashboardData();
-        closeDrawer();
-      } catch (err) {
-        alert(`Failed to load benchmark dataset: ${err.message}`);
-      } finally {
-        btnLoadSample.disabled = false;
-        btnLoadSample.innerHTML = `<span>⚡ Load BSNL Benchmark</span>`;
-      }
-    });
-  }
-
   if (btnRefreshData) {
     btnRefreshData.addEventListener('click', () => loadDashboardData());
   }
 
   // ============================================================
-  // UPLOAD FORM SUBMIT HANDLER
+  // UPLOAD FORM SUBMIT HANDLER (DYNAMIC N BIDDERS)
   // ============================================================
   if (uploadForm) {
     uploadForm.addEventListener('submit', async (e) => {
@@ -894,23 +886,44 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
+      const count = parseInt(numBiddersSelect ? numBiddersSelect.value : '2', 10) || 2;
+      const formData = new FormData();
+      formData.append('tender_pdf', tenderPdf);
+      formData.append('tender_boq', tenderBoq);
+      formData.append('bidder_count', count);
+
+      const bidderData = [];
+      for (let i = 0; i < count; i++) {
+        const letter = String.fromCharCode(65 + i);
+        const bId = `bidder_${letter}`;
+        const nameVal = document.getElementById(`upBidderName_${bId}`)?.value.trim();
+        const bName = nameVal || `Bidder ${letter}`;
+
+        const techFile = document.getElementById(`upBidderTech_${bId}`)?.files[0];
+        const finFile = document.getElementById(`upBidderFin_${bId}`)?.files[0];
+        const boqFile = document.getElementById(`upBidderBoq_${bId}`)?.files[0];
+
+        if (!techFile || !boqFile) {
+          alert(`Please upload both Technical Bid PDF and BOQ Excel for Bidder ${i + 1} (${bName}).`);
+          return;
+        }
+
+        formData.append(`file_${bId}_tech`, techFile);
+        if (finFile) {
+          formData.append(`file_${bId}_fin`, finFile);
+        }
+        formData.append(`file_${bId}_boq`, boqFile);
+
+        bidderData.push({ id: bId, name: bName });
+      }
+
+      formData.append('bidder_data_json', JSON.stringify(bidderData));
+
       const submitBtn = document.getElementById('btnSubmitUpload');
       if (submitBtn) {
         submitBtn.disabled = true;
         submitBtn.innerHTML = `<span>⏳ Evaluating Multi-Bidder Proposals...</span>`;
       }
-
-      const formData = new FormData();
-      formData.append('tender_pdf', tenderPdf);
-      formData.append('tender_boq', tenderBoq);
-      formData.append('bidder_count', 3);
-
-      const bidderData = [
-        { id: 'bidder_A', name: document.getElementById('upBidderName_bidder_A')?.value || 'Bidder A' },
-        { id: 'bidder_B', name: document.getElementById('upBidderName_bidder_B')?.value || 'Bidder B' },
-        { id: 'bidder_C', name: document.getElementById('upBidderName_bidder_C')?.value || 'Bidder C' }
-      ];
-      formData.append('bidder_data_json', JSON.stringify(bidderData));
 
       try {
         const res = await fetch('/api/analyze', {
@@ -918,7 +931,10 @@ document.addEventListener('DOMContentLoaded', () => {
           body: formData
         });
 
-        if (!res.ok) throw new Error(`HTTP ${res.status}: Upload evaluation failed`);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || errData.log || `HTTP ${res.status}: Upload evaluation failed`);
+        }
         const result = await res.json();
 
         alert('Evaluation pipeline completed successfully!');

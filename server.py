@@ -18,7 +18,7 @@ for extra in [r"D:\document-intelligence\.venv\Lib\site-packages", r"D:\Python\L
         sys.path.append(extra)
 
 import uvicorn
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -29,7 +29,6 @@ BASE_DIR = Path(__file__).resolve().parent
 RAW_FOLDER = BASE_DIR / "data" / "raw" / "tender_001"
 PROCESSED_FOLDER = BASE_DIR / "data" / "processed" / "tender_001"
 WEB_DIR = BASE_DIR / "web"
-SAMPLE_DIR = BASE_DIR / "data" / "bsnl_tender_dataset"
 
 RAW_FOLDER.mkdir(parents=True, exist_ok=True)
 PROCESSED_FOLDER.mkdir(parents=True, exist_ok=True)
@@ -213,108 +212,64 @@ def clear_all_data():
                         pass
 
         if RAW_FOLDER.exists():
-            for folder in [RAW_FOLDER / "tender", RAW_FOLDER / "bidder_A", RAW_FOLDER / "bidder_B", RAW_FOLDER / "bidder_C"]:
-                if folder.exists():
-                    for f in folder.iterdir():
-                        if f.is_file():
-                            try:
-                                f.unlink()
-                            except Exception:
-                                pass
-            names_file = RAW_FOLDER / "bidder_names.json"
-            if names_file.exists():
-                try:
-                    names_file.unlink()
-                except Exception:
-                    pass
+            for item in RAW_FOLDER.iterdir():
+                if item.is_dir():
+                    shutil.rmtree(item, ignore_errors=True)
+                elif item.is_file():
+                    try:
+                        item.unlink()
+                    except Exception:
+                        pass
 
         return {"success": True, "message": "All evaluation data cleared successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to clear data: {str(e)}")
 
 
-@app.post("/api/load-sample")
-def load_sample_dataset():
-    """
-    1-click instant benchmark loader: Copies the authentic BSNL tender
-    and 3 competing bidder submissions, runs the pipeline, and returns results.
-    """
-    if not SAMPLE_DIR.exists():
-        # Generate sample dataset if not present
-        from create_bsnl_bidders import DATASET_DIR
-        pass
-
-    tender_src = SAMPLE_DIR / "Common_Tender"
-    t_dest = RAW_FOLDER / "tender"
-    t_dest.mkdir(parents=True, exist_ok=True)
-
-    # Clean existing raw folder
-    for folder in [RAW_FOLDER / "tender", RAW_FOLDER / "bidder_A", RAW_FOLDER / "bidder_B", RAW_FOLDER / "bidder_C"]:
-        if folder.exists():
-            for f in folder.iterdir():
-                if f.is_file():
-                    try:
-                        f.unlink()
-                    except Exception:
-                        pass
-
-    # Copy Common Tender
-    for f in tender_src.iterdir():
-        if f.is_file():
-            shutil.copy(f, t_dest / f.name)
-
-    # Copy Bidders
-    bidder_map = {
-        "bidder_A": ("Bidder_A_Shiva_Construction", "Shiva Construction Co."),
-        "bidder_B": ("Bidder_B_Haldwani_Infra", "Haldwani Infrastructure Pvt Ltd"),
-        "bidder_C": ("Bidder_C_Kumaon_Buildcon", "Kumaon Buildcon Projects")
-    }
-
-    names_data = {}
-    for b_id, (src_name, b_label) in bidder_map.items():
-        b_src = SAMPLE_DIR / src_name
-        b_dest = RAW_FOLDER / b_id
-        b_dest.mkdir(parents=True, exist_ok=True)
-        for f in b_src.iterdir():
-            if f.is_file():
-                shutil.copy(f, b_dest / f.name)
-        names_data[b_id] = b_label
-
-    with open(RAW_FOLDER / "bidder_names.json", "w", encoding="utf-8") as f:
-        json.dump(names_data, f, indent=4)
-
-    # Run pipeline
-    result = _run_pipeline()
-    if result.returncode != 0:
-        return JSONResponse(status_code=500, content={"success": False, "log": result.stderr or result.stdout})
-
-    return {"success": True, "message": "Sample BSNL benchmark dataset loaded and evaluated successfully!", "log": result.stdout}
-
-
 @app.post("/api/analyze")
-async def analyze_documents(
-    tender_pdf: UploadFile = File(...),
-    tender_boq: UploadFile = File(...),
-    bidder_count: int = Form(...),
-    bidder_data_json: str = Form(...)
-):
+async def analyze_documents(request: Request):
     """
     Accepts uploaded Common Tender and N Bidder documents, saves them to data/raw/tender_001,
     and executes the automated pipeline.
     """
+    form = await request.form()
+    
+    tender_pdf = form.get("tender_pdf")
+    tender_boq = form.get("tender_boq")
+    bidder_count_raw = form.get("bidder_count")
+    bidder_data_json = form.get("bidder_data_json")
+
+    if not tender_pdf or not tender_boq:
+        raise HTTPException(status_code=400, detail="Tender PDF and Tender BOQ files are required.")
+
     try:
-        bidders_info = json.loads(bidder_data_json)
+        bidders_info = json.loads(bidder_data_json) if bidder_data_json else []
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid bidder_data_json payload.")
 
-    # 1. Clear previous raw files
+    # 1. Clear previous processed files
+    if PROCESSED_FOLDER.exists():
+        for f in PROCESSED_FOLDER.iterdir():
+            if f.is_file():
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
+
+    # 2. Clear previous raw files
+    if RAW_FOLDER.exists():
+        for item in RAW_FOLDER.iterdir():
+            if item.is_dir():
+                shutil.rmtree(item, ignore_errors=True)
+            elif item.is_file():
+                try:
+                    item.unlink()
+                except Exception:
+                    pass
+
+    # 3. Save Common Tender files
     t_dest = RAW_FOLDER / "tender"
     t_dest.mkdir(parents=True, exist_ok=True)
-    for f in t_dest.iterdir():
-        if f.is_file():
-            f.unlink()
-
-    # 2. Save Common Tender files
     t_pdf_path = t_dest / tender_pdf.filename
     with open(t_pdf_path, "wb") as f:
         f.write(await tender_pdf.read())
@@ -323,28 +278,40 @@ async def analyze_documents(
     with open(t_boq_path, "wb") as f:
         f.write(await tender_boq.read())
 
-    # If .xls uploaded, copy companion .xlsx if available
-    if t_boq_path.suffix.lower() == ".xls":
-        dataset_boq = SAMPLE_DIR / "Common_Tender" / "BSNL_Tender_BOQ.xlsx"
-        if dataset_boq.exists():
-            shutil.copy(dataset_boq, t_dest / "BSNL_Tender_BOQ.xlsx")
-
-    # 3. Save Bidders
+    # 4. Save each Bidder's documents
     names_map = {}
     for b_item in bidders_info:
         b_id = b_item.get("id")
         b_name = b_item.get("name") or b_id
         names_map[b_id] = b_name
 
+        b_folder = RAW_FOLDER / b_id
+        b_folder.mkdir(parents=True, exist_ok=True)
+
+        tech_file = form.get(f"file_{b_id}_tech")
+        if tech_file and hasattr(tech_file, "filename") and tech_file.filename:
+            with open(b_folder / tech_file.filename, "wb") as f:
+                f.write(await tech_file.read())
+
+        fin_file = form.get(f"file_{b_id}_fin")
+        if fin_file and hasattr(fin_file, "filename") and fin_file.filename:
+            with open(b_folder / fin_file.filename, "wb") as f:
+                f.write(await fin_file.read())
+
+        boq_file = form.get(f"file_{b_id}_boq")
+        if boq_file and hasattr(boq_file, "filename") and boq_file.filename:
+            with open(b_folder / boq_file.filename, "wb") as f:
+                f.write(await boq_file.read())
+
     with open(RAW_FOLDER / "bidder_names.json", "w", encoding="utf-8") as f:
         json.dump(names_map, f, indent=4)
 
-    # 4. Run pipeline
+    # 5. Run automated pipeline
     result = _run_pipeline()
     if result.returncode != 0:
         return JSONResponse(status_code=500, content={"success": False, "log": result.stderr or result.stdout})
 
-    return {"success": True, "message": "Pipeline completed successfully!", "log": result.stdout}
+    return {"success": True, "message": "Evaluation pipeline completed successfully!", "log": result.stdout}
 
 
 # Serve static frontend
