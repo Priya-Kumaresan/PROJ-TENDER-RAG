@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TenderAI RAG — Multi-Bidder Procurement Decision Support</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- ============================================================
+       SIDEBAR
+       ============================================================ -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo-icon">📑</div>
+      <div class="logo-text">
+        <h1>TenderAI RAG</h1>
+        <p>Multi-Bidder Decision Support</p>
+      </div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-title">Evaluation Modules</div>
+      <ul class="nav-menu">
+        <li class="nav-item active" data-tab="dashboard">
+          <span class="icon">📊</span>
+          <span>Executive Dashboard</span>
+        </li>
+        <li class="nav-item" data-tab="tender">
+          <span class="icon">📑</span>
+          <span>Tender Overview</span>
+        </li>
+        <li class="nav-item" data-tab="boq">
+          <span class="icon">🔢</span>
+          <span>BOQ Validation & Audit</span>
+        </li>
+        <li class="nav-item" data-tab="comparison">
+          <span class="icon">⚖️</span>
+          <span>Bidder Compliance</span>
+        </li>
+        <li class="nav-item" data-tab="ranking">
+          <span class="icon">🏅</span>
+          <span>Multi-Bidder Ranking</span>
+        </li>
+        <li class="nav-item" data-tab="risk">
+          <span class="icon">⚠️</span>
+          <span>Risk Analysis</span>
+        </li>
+        <li class="nav-item" data-tab="rag">
+          <span class="icon">🤖</span>
+          <span>RAG Evidence Assistant</span>
+        </li>
+      </ul>
+    </div>
+
+    <div class="sidebar-actions">
+      <button class="btn btn-secondary btn-block" id="btnOpenDrawer">
+        <span>📁 Upload New Documents</span>
+      </button>
+      <button class="btn btn-primary btn-block" id="btnLoadSample">
+        <span>⚡ Load BSNL Benchmark</span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- ============================================================
+       MAIN CONTENT WRAPPER
+       ============================================================ -->
+  <main class="main-wrapper">
+    <!-- Top Navigation Bar -->
+    <header class="topbar">
+      <div class="page-title">
+        <h2 id="currentTabTitle">Executive Tender & Multi-Bidder Dashboard</h2>
+        <p id="currentTabDesc">Evidence-grounded decision support for procurement and evaluation committees.</p>
+      </div>
+      <div class="topbar-actions">
+        <span class="badge badge-success" id="connectionBadge">● Evaluation Live</span>
+        <button class="btn btn-secondary btn-sm" id="btnRefreshData">↻ Refresh Data</button>
+      </div>
+    </header>
+
+    <!-- Content Container -->
+    <div class="content-container">
+
+      <!-- ========================================================
+           TAB 1: EXECUTIVE DASHBOARD
+           ======================================================== -->
+      <section class="tab-pane active" id="tab-dashboard">
+        <!-- KPI Metrics -->
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <span class="kpi-label">Tender Identifier</span>
+            <span class="kpi-value" id="kpiTenderId">-</span>
+            <span class="kpi-caption" id="kpiOrg">-</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Bidders Evaluated</span>
+            <span class="kpi-value" id="kpiBiddersCount">0</span>
+            <span class="kpi-caption">Active vendor proposals</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Qualified / Disqualified</span>
+            <span class="kpi-value" id="kpiQualCount">0 / 0</span>
+            <span class="kpi-caption">Mandatory clause screening</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Recommended Bidder</span>
+            <span class="kpi-value" id="kpiRecommended" style="color: #34d399;">-</span>
+            <span class="kpi-caption">Rank 1 provisional candidate</span>
+          </div>
+        </div>
+
+        <!-- Provisional Recommendation Hero Card -->
+        <div class="recom-hero">
+          <div class="recom-card">
+            <div class="recom-card-title">
+              <h3 id="heroRecTitle">🏆 Rank 1 — Recommended: Pending</h3>
+              <span class="badge badge-success">Rank 1 — RECOMMENDED</span>
+            </div>
+            <p id="heroRecText" style="color: var(--text-secondary); margin-bottom: 16px; font-size: 13.5px;">
+              Awaiting document processing and evaluation.
+            </p>
+            <div style="background: rgba(30, 41, 59, 0.7); padding: 12px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+              <div style="font-size: 12px; color: var(--accent); font-weight: 600;">Next Eligible / Reserve Alternative:</div>
+              <div id="heroReserveText" style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-top: 2px;">None</div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Activated only if Rank 1 fails due diligence, withdraws, or fails performance security.</div>
+            </div>
+          </div>
+
+          <div class="protocol-card">
+            <h4>⚠️ Decision-Support Protocol</h4>
+            <p>
+              This system provides AI-assisted, deterministic and evidence-grounded decision support for procurement committees.
+              The software does not automatically execute contract awards; final procurement authority rests with the official tender committee.
+            </p>
+          </div>
+        </div>
+
+        <!-- Baseline Parameters & Audit Highlights -->
+        <div class="table-card">
+          <div class="table-header">
+            <div>
+              <h3>📌 Baseline Tender Specifications & Contractual Rules</h3>
+              <p>Key requirements extracted verbatim from the common tender document</p>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" id="dashboardBaselineTable">
+              <thead>
+                <tr>
+                  <th>Parameter</th>
+                  <th>Tender Requirement</th>
+                  <th>Source Citation</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="3" style="text-align: center; color: var(--text-muted);">Loading baseline requirements...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================================
+           TAB 2: TENDER OVERVIEW
+           ======================================================== -->
+      <section class="tab-pane" id="tab-tender">
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <span class="kpi-label">Completion Period</span>
+            <span class="kpi-value" id="tOverviewCompletion">-</span>
+            <span class="kpi-caption">Mandatory maximum schedule</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Earnest Money (EMD)</span>
+            <span class="kpi-value" id="tOverviewEMD">-</span>
+            <span class="kpi-caption">Bid security deposit</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Performance Security</span>
+            <span class="kpi-value" id="tOverviewSecurity">-</span>
+            <span class="kpi-caption">Contract performance guarantee</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Proposal Validity</span>
+            <span class="kpi-value" id="tOverviewValidity">-</span>
+            <span class="kpi-caption">Validity from closing date</span>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="table-header">
+            <div>
+              <h3>Extracted Structured Tender Fields</h3>
+              <p>Every extracted field links directly to its verbatim text evidence and page number</p>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" id="tenderFieldsTable">
+              <thead>
+                <tr>
+                  <th>Tender Field</th>
+                  <th>Extracted Value</th>
+                  <th>Document Page</th>
+                  <th>Verbatim Evidence Excerpt</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="4" style="text-align: center; color: var(--text-muted);">No tender fields loaded.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="table-header">
+            <div>
+              <h3>Detected Document Sections</h3>
+              <p>Hierarchical clause structure detected across the tender document</p>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" id="tenderSectionsTable">
+              <thead>
+                <tr>
+                  <th>Section Number</th>
+                  <th>Section Title</th>
+                  <th>Starting Page</th>
+                  <th>Character Length</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="4" style="text-align: center; color: var(--text-muted);">No sections loaded.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================================
+           TAB 3: BOQ ANALYSIS & VALIDATION
+           ======================================================== -->
+      <section class="tab-pane" id="tab-boq">
+        <div class="table-card">
+          <div class="table-header">
+            <div>
+              <h3>Tender Baseline Bill of Quantities (BOQ)</h3>
+              <p>Official schedule of maintenance items, units, and estimated quantities</p>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" id="tenderBoqTable">
+              <thead>
+                <tr>
+                  <th>Item No</th>
+                  <th>Description of Work</th>
+                  <th>Quantity</th>
+                  <th>Unit</th>
+                  <th>Estimated Rate (INR)</th>
+                  <th>Estimated Amount (INR)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No BOQ items loaded.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="table-header">
+            <div>
+              <h3>Bidder BOQ Arithmetic Auditing & Anomaly Detection</h3>
+              <p>Deterministic checks verifying Quantity × Quoted Rate = Amount and missing values</p>
+            </div>
+            <select class="select" id="boqBidderSelect" style="width: 240px;"></select>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" id="bidderBoqTable">
+              <thead>
+                <tr>
+                  <th>Item No</th>
+                  <th>Description</th>
+                  <th>Quantity</th>
+                  <th>Quoted Rate</th>
+                  <th>Quoted Amount</th>
+                  <th>Expected Amount</th>
+                  <th>Audit Status</th>
+                  <th>Validation Finding</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="8" style="text-align: center; color: var(--text-muted);">Select a bidder to view BOQ validation.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================================
+           TAB 4: BIDDER COMPLIANCE & COMPARISON MATRIX
+           ======================================================== -->
+      <section class="tab-pane" id="tab-comparison">
+        <div class="table-card">
+          <div class="table-header">
+            <div>
+              <h3>Side-by-Side Requirement Compliance Matrix</h3>
+              <p>Comparison of all bidder proposals directly against the baseline tender requirement</p>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" id="complianceMatrixTable">
+              <thead>
+                <tr id="complianceMatrixHeader">
+                  <th>Requirement</th>
+                  <th>Tender Baseline</th>
+                </tr>
+              </thead>
+              <tbody id="complianceMatrixBody">
+                <tr><td colspan="4" style="text-align: center; color: var(--text-muted);">Loading comparison matrix...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="table-header">
+            <div>
+              <h3>Substantive Differences & Operational Impact</h3>
+              <p>Identified deviations in bidder commitments and their impact on execution</p>
+            </div>
+          </div>
+          <div id="substantiveDiffsContainer" style="padding: 16px 20px; display: flex; flex-direction: column; gap: 12px;"></div>
+        </div>
+      </section>
+
+      <!-- ========================================================
+           TAB 5: MULTI-BIDDER RANKING & FALLBACK
+           ======================================================== -->
+      <section class="tab-pane" id="tab-ranking">
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <span class="kpi-label">Technical Weight</span>
+            <span class="kpi-value" id="rkTechWeight">80%</span>
+            <span class="kpi-caption">QCBS evaluation weight</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Financial Weight</span>
+            <span class="kpi-value" id="rkFinWeight">20%</span>
+            <span class="kpi-caption">QCBS evaluation weight</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Min Technical Cutoff</span>
+            <span class="kpi-value" id="rkCutoff">70.0</span>
+            <span class="kpi-caption">Minimum qualifying score</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Benchmark L1 Quote</span>
+            <span class="kpi-value" id="rkL1Quote">-</span>
+            <span class="kpi-caption">Lowest qualified price</span>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="table-header">
+            <div>
+              <h3>1. Comprehensive Bidder Ranking Table</h3>
+              <p>Qualified bidders ranked descending by Overall Score. Disqualified bidders listed separately below.</p>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" id="rankingTable">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Bidder Company</th>
+                  <th>Qualification</th>
+                  <th>Technical Score</th>
+                  <th>Financial Quote</th>
+                  <th>Financial Score</th>
+                  <th>Overall Score</th>
+                  <th>Evaluation Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="8" style="text-align: center; color: var(--text-muted);">Loading ranking table...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Interactive Fallback Simulator -->
+        <div class="table-card" style="border-color: rgba(56, 189, 248, 0.3);">
+          <div class="table-header">
+            <div>
+              <h3>2. Interactive Fallback Recalculation Simulator</h3>
+              <p>Simulate post-qualification disqualification or withdrawal of active candidates</p>
+            </div>
+          </div>
+          <div style="padding: 20px; display: grid; grid-template-columns: 2fr 3fr auto; gap: 14px; align-items: end;">
+            <div>
+              <label style="display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 6px;">Select Bidder to Disqualify / Withdraw:</label>
+              <select class="select" id="fallbackBidderSelect"></select>
+            </div>
+            <div>
+              <label style="display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 6px;">Reason for Disqualification / Withdrawal:</label>
+              <input type="text" class="input" id="fallbackReasonInput" value="Failed post-qualification verification / voluntary withdrawal">
+            </div>
+            <div>
+              <button class="btn btn-primary" id="btnRunFallback">⚡ Recalculate Ranking</button>
+            </div>
+          </div>
+          <div id="fallbackResultAlert" style="display: none; margin: 0 20px 20px; padding: 14px 18px; background: rgba(56, 189, 248, 0.1); border: 1px solid var(--accent); border-radius: var(--radius-sm); font-size: 13px; color: var(--accent);"></div>
+        </div>
+
+        <!-- Audit Trail -->
+        <div class="table-card">
+          <div class="table-header">
+            <div>
+              <h3>3. Recommendation Audit Trail</h3>
+              <p>Immutable chronological log of all ranking evaluations and fallback events</p>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" id="auditTrailTable">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Event Type</th>
+                  <th>Recommended Bidder</th>
+                  <th>Reserve Fallback</th>
+                  <th>Event Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No audit entries.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================================
+           TAB 6: RISK ANALYSIS
+           ======================================================== -->
+      <section class="tab-pane" id="tab-risk">
+        <div class="table-card">
+          <div class="table-header">
+            <div>
+              <h3>Tender Contractual & Operational Risks</h3>
+              <p>Automated risk identification covering contractual clauses, liquidated damages, and warranties</p>
+            </div>
+          </div>
+          <div id="tenderRisksList" style="padding: 20px; display: flex; flex-direction: column; gap: 12px;"></div>
+        </div>
+      </section>
+
+      <!-- ========================================================
+           TAB 7: RAG EVIDENCE ASSISTANT
+           ======================================================== -->
+      <section class="tab-pane" id="tab-rag">
+        <div class="chat-container">
+          <div class="chat-input-card">
+            <div style="font-size: 13px; font-weight: 600; margin-bottom: 10px; color: var(--text-secondary);">Suggested Questions:</div>
+            <div class="chat-suggestions">
+              <span class="suggestion-pill" data-query="Which company fails the evaluation and why?">👉 Which company fails?</span>
+              <span class="suggestion-pill" data-query="Who is the recommended bidder and why?">👉 Who is recommended?</span>
+              <span class="suggestion-pill" data-query="What is the project completion period?">👉 What is the completion period?</span>
+              <span class="suggestion-pill" data-query="What is the Earnest Money Deposit (EMD) amount?">👉 What is the EMD amount?</span>
+              <span class="suggestion-pill" data-query="What performance security must the successful bidder provide?">👉 Performance security requirement</span>
+              <span class="suggestion-pill" data-query="Who is the next eligible / reserve alternative bidder?">👉 Who is the reserve bidder?</span>
+            </div>
+
+            <div style="margin-bottom: 12px;">
+              <textarea class="textarea" id="ragQueryInput" rows="3" placeholder="Enter your question regarding the tender or bidder evaluation (e.g., Which company fails? Or What is the EMD amount?)..."></textarea>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end;">
+              <button class="btn btn-primary" id="btnAskRag">
+                <span>🔎 Ask Assistant</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- RAG Answer Display -->
+          <div class="chat-response-card" id="ragResponseCard">
+            <div style="font-size: 14px; font-weight: 700; color: #38bdf8; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
+              <span>💬 Evidence-Grounded Answer</span>
+            </div>
+            <div class="chat-answer" id="ragAnswerText"></div>
+
+            <div style="font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 10px;">
+              📚 Retrieved Source Citations & Document Evidence:
+            </div>
+            <div class="source-citations" id="ragSourcesContainer"></div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- ============================================================
+       SLIDE-OUT DOCUMENT UPLOAD DRAWER
+       ============================================================ -->
+  <div class="drawer" id="uploadDrawer">
+    <div class="drawer-header">
+      <h3 style="font-size: 16px; font-weight: 700;">Upload Tender & Bids</h3>
+      <button class="close-btn" id="btnCloseDrawer">✕</button>
+    </div>
+
+    <form id="uploadForm">
+      <div class="upload-group">
+        <h4>1. Common Tender Baseline</h4>
+        <div class="file-input-wrapper">
+          <label>Tender Document (PDF):</label>
+          <input type="file" class="input" id="upTenderPdf" accept=".pdf" required>
+        </div>
+        <div class="file-input-wrapper">
+          <label>Tender BOQ (Excel):</label>
+          <input type="file" class="input" id="upTenderBoq" accept=".xlsx,.xls" required>
+        </div>
+      </div>
+
+      <div class="upload-group">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+          <h4>2. Competing Bidders</h4>
+          <span style="font-size: 11px; color: var(--accent);">3 Bidders Configured</span>
+        </div>
+        <div id="drawerBiddersContainer"></div>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-block" id="btnSubmitUpload">
+        <span>🔍 Start Multi-Bidder Evaluation</span>
+      </button>
+    </form>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
