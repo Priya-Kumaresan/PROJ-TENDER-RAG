@@ -672,3 +672,4 @@ table.data-table tr:last-child td {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+

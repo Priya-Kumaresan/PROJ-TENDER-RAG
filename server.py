@@ -104,10 +104,10 @@ def get_status():
     tender_data = _load_json(tender_file) if has_data else None
     ranking_data = _load_json(ranking_file) if has_data else None
 
-    tender_no = "N/A"
-    org = "N/A"
-    project = "N/A"
-    recommended = "None"
+    tender_no = "Not Loaded"
+    org = "No tender documents evaluated"
+    project = "-"
+    recommended = "Pending Upload"
     bidders_count = 0
 
     if tender_data:
@@ -195,6 +195,42 @@ def simulate_fallback(req: FallbackRequest):
         return updated
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fallback recalculation failed: {str(e)}")
+
+
+@app.post("/api/clear")
+def clear_all_data():
+    """
+    Clears all processed evaluation results and uploaded files, resetting
+    the dashboard to a completely fresh state.
+    """
+    try:
+        if PROCESSED_FOLDER.exists():
+            for f in PROCESSED_FOLDER.iterdir():
+                if f.is_file():
+                    try:
+                        f.unlink()
+                    except Exception:
+                        pass
+
+        if RAW_FOLDER.exists():
+            for folder in [RAW_FOLDER / "tender", RAW_FOLDER / "bidder_A", RAW_FOLDER / "bidder_B", RAW_FOLDER / "bidder_C"]:
+                if folder.exists():
+                    for f in folder.iterdir():
+                        if f.is_file():
+                            try:
+                                f.unlink()
+                            except Exception:
+                                pass
+            names_file = RAW_FOLDER / "bidder_names.json"
+            if names_file.exists():
+                try:
+                    names_file.unlink()
+                except Exception:
+                    pass
+
+        return {"success": True, "message": "All evaluation data cleared successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to clear data: {str(e)}")
 
 
 @app.post("/api/load-sample")

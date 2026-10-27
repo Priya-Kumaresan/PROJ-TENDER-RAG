@@ -79,12 +79,29 @@
       </div>
       <div class="topbar-actions">
         <span class="badge badge-success" id="connectionBadge">● Evaluation Live</span>
-        <button class="btn btn-secondary btn-sm" id="btnRefreshData">↻ Refresh Data</button>
+        <button class="btn btn-secondary btn-sm" id="btnRefreshData">↻ Refresh</button>
+        <button class="btn btn-secondary btn-sm" id="btnClearData" style="border-color: rgba(239, 68, 68, 0.4); color: #f87171;" title="Clear evaluated data to start fresh">🗑️ Clear / Reset</button>
       </div>
     </header>
 
     <!-- Content Container -->
     <div class="content-container">
+
+      <!-- Empty State Banner -->
+      <div id="emptyStateBanner" style="display: none; background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: var(--radius-md); padding: 22px 26px; margin-bottom: 24px;">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+          <div>
+            <h3 style="font-size: 16px; font-weight: 700; color: #38bdf8; margin-bottom: 6px;">👋 No Evaluation Data Loaded (Ready for Documents)</h3>
+            <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.5; max-width: 680px; margin-bottom: 14px;">
+              The evaluation engine is initialized and waiting for documents. You can upload custom tender specifications and bidder proposals, or click <strong>Load BSNL Benchmark</strong> to test the complete multi-bidder pipeline with the included sample tender.
+            </p>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+              <button class="btn btn-primary btn-sm" id="btnEmptyUpload">📁 Upload Tender & Bids</button>
+              <button class="btn btn-secondary btn-sm" id="btnEmptySample">⚡ Load BSNL Benchmark (Sample)</button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <!-- ========================================================
            TAB 1: EXECUTIVE DASHBOARD
@@ -543,3 +560,4 @@
   <script src="/static/js/app.js"></script>
 </body>
 </html>
+

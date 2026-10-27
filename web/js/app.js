@@ -15,6 +15,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const currentTabDesc = document.getElementById('currentTabDesc');
   const connectionBadge = document.getElementById('connectionBadge');
   const btnRefreshData = document.getElementById('btnRefreshData');
+  const btnClearData = document.getElementById('btnClearData');
+  const emptyStateBanner = document.getElementById('emptyStateBanner');
+  const btnEmptyUpload = document.getElementById('btnEmptyUpload');
+  const btnEmptySample = document.getElementById('btnEmptySample');
 
   // Upload Drawer Elements
   const uploadDrawer = document.getElementById('uploadDrawer');
@@ -79,7 +83,6 @@ document.addEventListener('DOMContentLoaded', () => {
   function switchTab(tabId) {
     activeTab = tabId;
 
-    // Update nav item active states
     navItems.forEach(item => {
       if (item.getAttribute('data-tab') === tabId) {
         item.classList.add('active');
@@ -88,7 +91,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    // Update tab pane visibility
     tabPanes.forEach(pane => {
       if (pane.id === `tab-${tabId}`) {
         pane.classList.add('active');
@@ -97,7 +99,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    // Update header
     if (tabMeta[tabId]) {
       currentTabTitle.textContent = tabMeta[tabId].title;
       currentTabDesc.textContent = tabMeta[tabId].desc;
@@ -124,8 +125,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (btnOpenDrawer) btnOpenDrawer.addEventListener('click', openDrawer);
   if (btnCloseDrawer) btnCloseDrawer.addEventListener('click', closeDrawer);
+  if (btnEmptyUpload) btnEmptyUpload.addEventListener('click', openDrawer);
+  if (btnEmptySample) btnEmptySample.addEventListener('click', () => {
+    if (btnLoadSample) btnLoadSample.click();
+  });
 
-  // Render 3 Bidder file inputs in drawer
   function renderDrawerBidders() {
     if (!drawerBiddersContainer) return;
     const bidders = [
@@ -158,7 +162,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // FETCH & RENDER DASHBOARD DATA
   // ============================================================
   async function loadDashboardData() {
-    connectionBadge.textContent = '⏳ Loading Evaluation Data...';
+    connectionBadge.textContent = '⏳ Checking Data...';
     connectionBadge.className = 'badge badge-warning';
 
     try {
@@ -167,17 +171,33 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await res.json();
       cachedData = data;
 
-      // Update UI components
-      renderKPIs(data);
-      renderBaselineTable(data);
-      renderTenderOverview(data);
-      renderBOQ(data);
-      renderComplianceMatrix(data);
-      renderRanking(data);
-      renderRisks(data);
+      const hasValidData = Boolean(
+        data.tender &&
+        data.tender.tender_fields &&
+        Object.keys(data.tender.tender_fields).length > 0 &&
+        data.ranking
+      );
 
-      connectionBadge.textContent = '● Evaluation Live';
-      connectionBadge.className = 'badge badge-success';
+      // Handle Empty State Banner & Connection Badge
+      if (!hasValidData) {
+        if (emptyStateBanner) emptyStateBanner.style.display = 'block';
+        connectionBadge.textContent = '○ Awaiting Documents';
+        connectionBadge.className = 'badge badge-warning';
+      } else {
+        if (emptyStateBanner) emptyStateBanner.style.display = 'none';
+        connectionBadge.textContent = '● Evaluation Live';
+        connectionBadge.className = 'badge badge-success';
+      }
+
+      // Update UI components
+      renderKPIs(data, hasValidData);
+      renderBaselineTable(data, hasValidData);
+      renderTenderOverview(data, hasValidData);
+      renderBOQ(data, hasValidData);
+      renderComplianceMatrix(data, hasValidData);
+      renderRanking(data, hasValidData);
+      renderRisks(data, hasValidData);
+
     } catch (err) {
       console.error('Failed to load dashboard data:', err);
       connectionBadge.textContent = '⚠️ Data Disconnected';
@@ -188,19 +208,19 @@ document.addEventListener('DOMContentLoaded', () => {
   // ============================================================
   // TAB 1: EXECUTIVE DASHBOARD RENDERER
   // ============================================================
-  function renderKPIs(data) {
+  function renderKPIs(data, hasData) {
     const tender = data.tender || {};
     const fields = tender.tender_fields || {};
     const ranking = data.ranking || {};
     const bidders = data.bidders || {};
 
-    const tenderNo = fields.tender_number?.value || '19/NIT/EE(C)/BSNL/HLW/2026-27';
-    const org = fields.organisation?.value || 'BHARAT SANCHAR NIGAM LIMITED';
-    const bCount = Object.keys(bidders).length || ranking.ranking_table?.length || 3;
-    const qualCount = ranking.qualified_bidders?.length || 2;
-    const disqCount = ranking.disqualified_bidders?.length || 1;
-    const recommended = ranking.recommended_bidder || 'Shiva Construction';
-    const reserve = ranking.next_eligible_bidder || 'Kumaon Buildcon';
+    const tenderNo = fields.tender_number?.value || (hasData ? 'N/A' : 'Not Loaded');
+    const org = fields.organisation?.value || (hasData ? 'N/A' : 'No documents evaluated yet');
+    const bCount = Object.keys(bidders).length || ranking.ranking_table?.length || 0;
+    const qualCount = ranking.qualified_bidders?.length || 0;
+    const disqCount = ranking.disqualified_bidders?.length || 0;
+    const recommended = ranking.recommended_bidder || (hasData ? 'None' : 'Pending Upload');
+    const reserve = ranking.next_eligible_bidder || 'None';
 
     document.getElementById('kpiTenderId').textContent = tenderNo;
     document.getElementById('kpiOrg').textContent = org;
@@ -213,19 +233,32 @@ document.addEventListener('DOMContentLoaded', () => {
     const heroText = document.getElementById('heroRecText');
     const heroReserve = document.getElementById('heroReserveText');
 
-    if (heroTitle) heroTitle.textContent = `🏆 Rank 1 — Recommended: ${recommended}`;
+    if (heroTitle) {
+      heroTitle.textContent = hasData 
+        ? `🏆 Rank 1 — Recommended: ${recommended}` 
+        : '📋 Awaiting Evaluation';
+    }
     if (heroText) {
       heroText.textContent = ranking.recommendation_statement ||
-        `${recommended} is RECOMMENDED for contract award consideration as Rank 1 with the highest overall score of 76.0/100 (Technical: 70.0, Financial: 100.0, Quoted: INR 2,42,150.00). The bidder satisfies all mandatory tender qualification criteria.`;
+        (hasData 
+          ? `${recommended} is recommended for contract consideration.`
+          : 'No tender documents have been processed yet. Upload common tender specifications and bidder proposals to generate evidence-grounded recommendations.');
     }
     if (heroReserve) {
-      heroReserve.textContent = reserve ? `${reserve} (Rank 2 Candidate)` : 'None (No active eligible reserve)';
+      heroReserve.textContent = reserve && reserve !== 'None' 
+        ? `${reserve} (Rank 2 Candidate)` 
+        : (hasData ? 'None' : 'Awaiting Bids');
     }
   }
 
-  function renderBaselineTable(data) {
+  function renderBaselineTable(data, hasData) {
     const tbody = document.querySelector('#dashboardBaselineTable tbody');
     if (!tbody) return;
+
+    if (!hasData) {
+      tbody.innerHTML = `<tr><td colspan="3" style="text-align: center; color: var(--text-muted); padding: 24px;">No tender specifications loaded. Upload your tender files or load the BSNL sample.</td></tr>`;
+      return;
+    }
 
     const tender = data.tender || {};
     const fields = tender.tender_fields || {};
@@ -259,28 +292,27 @@ document.addEventListener('DOMContentLoaded', () => {
   // ============================================================
   // TAB 2: TENDER OVERVIEW RENDERER
   // ============================================================
-  function renderTenderOverview(data) {
+  function renderTenderOverview(data, hasData) {
     const tender = data.tender || {};
     const fields = tender.tender_fields || {};
     const sections = tender.sections || [];
 
-    // KPI Cards
     const completionEl = document.getElementById('tOverviewCompletion');
     const emdEl = document.getElementById('tOverviewEMD');
     const secEl = document.getElementById('tOverviewSecurity');
     const valEl = document.getElementById('tOverviewValidity');
 
-    if (completionEl) completionEl.textContent = fields.completion_period?.value || '04(Four) months';
-    if (emdEl) emdEl.textContent = fields.emd?.value || 'INR 4,993';
-    if (secEl) secEl.textContent = fields.performance_security?.value || '5%';
-    if (valEl) valEl.textContent = '30 Days';
+    if (completionEl) completionEl.textContent = fields.completion_period?.value || (hasData ? 'N/A' : '-');
+    if (emdEl) emdEl.textContent = fields.emd?.value || (hasData ? 'N/A' : '-');
+    if (secEl) secEl.textContent = fields.performance_security?.value || (hasData ? 'N/A' : '-');
+    if (valEl) valEl.textContent = hasData ? '30 Days' : '-';
 
     // Extracted Fields Table
     const fieldsTbody = document.querySelector('#tenderFieldsTable tbody');
     if (fieldsTbody) {
       const fieldKeys = Object.keys(fields);
-      if (fieldKeys.length === 0) {
-        fieldsTbody.innerHTML = `<tr><td colspan="4" style="text-align: center;">No fields extracted.</td></tr>`;
+      if (!hasData || fieldKeys.length === 0) {
+        fieldsTbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 20px;">No extracted tender fields. Upload tender documents to extract requirements.</td></tr>`;
       } else {
         fieldsTbody.innerHTML = fieldKeys.map(k => {
           const item = fields[k];
@@ -300,8 +332,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Detected Sections Table
     const sectionsTbody = document.querySelector('#tenderSectionsTable tbody');
     if (sectionsTbody) {
-      if (sections.length === 0) {
-        sectionsTbody.innerHTML = `<tr><td colspan="4" style="text-align: center;">No sections detected.</td></tr>`;
+      if (!hasData || sections.length === 0) {
+        sectionsTbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 20px;">No sections detected.</td></tr>`;
       } else {
         sectionsTbody.innerHTML = sections.map((s, idx) => `
           <tr>
@@ -318,15 +350,15 @@ document.addEventListener('DOMContentLoaded', () => {
   // ============================================================
   // TAB 3: BOQ ANALYSIS & VALIDATION RENDERER
   // ============================================================
-  function renderBOQ(data) {
+  function renderBOQ(data, hasData) {
     const tenderBoq = data.tender_boq || [];
     const bidders = data.bidders || {};
 
     // 1. Tender Baseline BOQ Table
     const tBoqTbody = document.querySelector('#tenderBoqTable tbody');
     if (tBoqTbody) {
-      if (tenderBoq.length === 0) {
-        tBoqTbody.innerHTML = `<tr><td colspan="6" style="text-align: center;">No tender BOQ items loaded.</td></tr>`;
+      if (!hasData || tenderBoq.length === 0) {
+        tBoqTbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">No baseline BOQ items loaded.</td></tr>`;
       } else {
         tBoqTbody.innerHTML = tenderBoq.map(item => {
           const rateStr = item.rate != null ? `₹${Number(item.rate).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : 'N/A';
@@ -348,18 +380,24 @@ document.addEventListener('DOMContentLoaded', () => {
     // 2. Populate Bidder Select
     if (boqBidderSelect) {
       const bidderIds = Object.keys(bidders);
-      boqBidderSelect.innerHTML = bidderIds.map(bId => {
-        const b = bidders[bId];
-        const name = b.bidder_name || bId;
-        return `<option value="${bId}">${name} (${bId})</option>`;
-      }).join('');
+      if (!hasData || bidderIds.length === 0) {
+        boqBidderSelect.innerHTML = `<option value="">No Bidders Loaded</option>`;
+        const bBoqTbody = document.querySelector('#bidderBoqTable tbody');
+        if (bBoqTbody) bBoqTbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 20px;">No bidder proposals uploaded yet.</td></tr>`;
+      } else {
+        boqBidderSelect.innerHTML = bidderIds.map(bId => {
+          const b = bidders[bId];
+          const name = b.bidder_name || bId;
+          return `<option value="${bId}">${name} (${bId})</option>`;
+        }).join('');
 
-      boqBidderSelect.onchange = () => {
-        renderBidderBoqTable(boqBidderSelect.value, bidders);
-      };
+        boqBidderSelect.onchange = () => {
+          renderBidderBoqTable(boqBidderSelect.value, bidders);
+        };
 
-      if (bidderIds.length > 0) {
-        renderBidderBoqTable(bidderIds[0], bidders);
+        if (bidderIds.length > 0) {
+          renderBidderBoqTable(bidderIds[0], bidders);
+        }
       }
     }
   }
@@ -370,7 +408,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const bidder = bidders[bidderId];
     if (!bidder || !bidder.boq_validation || bidder.boq_validation.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">No BOQ validation records found for this bidder.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 20px;">No BOQ validation records found for this bidder.</td></tr>`;
       return;
     }
 
@@ -412,7 +450,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // ============================================================
   // TAB 4: BIDDER COMPLIANCE & COMPARISON MATRIX RENDERER
   // ============================================================
-  function renderComplianceMatrix(data) {
+  function renderComplianceMatrix(data, hasData) {
     const comp = data.comparison || {};
     const fieldComparisons = comp.field_comparisons || [];
     const biddersSummary = comp.summary?.bidders || {};
@@ -423,13 +461,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (!headerTr || !tbody) return;
 
-    // Bidder keys and display names
+    if (!hasData) {
+      headerTr.innerHTML = `<th>Requirement</th><th>Baseline Specification</th><th>Bidder Compliance</th>`;
+      tbody.innerHTML = `<tr><td colspan="3" style="text-align: center; color: var(--text-muted); padding: 24px;">No compliance matrix available. Upload tender and bidder proposals to compare.</td></tr>`;
+      const diffsContainer = document.getElementById('substantiveDiffsContainer');
+      if (diffsContainer) diffsContainer.innerHTML = `<div style="color: var(--text-muted); font-size: 13px;">No substantive deviations evaluated yet.</div>`;
+      return;
+    }
+
     const bidderKeys = Object.keys(biddersSummary);
     if (bidderKeys.length === 0 && fieldComparisons.length > 0 && fieldComparisons[0].bidders) {
       Object.keys(fieldComparisons[0].bidders).forEach(k => bidderKeys.push(k));
     }
 
-    // Build Header
     headerTr.innerHTML = `
       <th style="min-width: 170px;">Tender Requirement</th>
       <th style="min-width: 150px;">Baseline Specification</th>
@@ -439,9 +483,8 @@ document.addEventListener('DOMContentLoaded', () => {
       }).join('')}
     `;
 
-    // Build Body Rows
     if (fieldComparisons.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="${2 + bidderKeys.length}" style="text-align: center;">No compliance comparisons available.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="${2 + bidderKeys.length}" style="text-align: center; color: var(--text-muted);">No compliance comparisons available.</td></tr>`;
     } else {
       tbody.innerHTML = fieldComparisons.map(item => {
         const fieldName = (item.field || '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
@@ -499,47 +542,47 @@ document.addEventListener('DOMContentLoaded', () => {
   // ============================================================
   // TAB 5: MULTI-BIDDER RANKING & FALLBACK RENDERER
   // ============================================================
-  function renderRanking(data) {
+  function renderRanking(data, hasData) {
     const ranking = data.ranking || {};
     const rankingTable = ranking.ranking_table || [];
     const auditTrail = ranking.audit_trail || [];
     const evalParams = ranking.evaluation_parameters || {};
 
-    // KPIs
     const techW = document.getElementById('rkTechWeight');
     const finW = document.getElementById('rkFinWeight');
     const cutoff = document.getElementById('rkCutoff');
     const l1Quote = document.getElementById('rkL1Quote');
 
-    if (techW) techW.textContent = `${Math.round((evalParams.technical_weight || 0.8) * 100)}%`;
-    if (finW) finW.textContent = `${Math.round((evalParams.financial_weight || 0.2) * 100)}%`;
-    if (cutoff) cutoff.textContent = (evalParams.min_technical_score || 70.0).toFixed(1);
+    if (techW) techW.textContent = hasData ? `${Math.round((evalParams.technical_weight || 0.8) * 100)}%` : '-';
+    if (finW) finW.textContent = hasData ? `${Math.round((evalParams.financial_weight || 0.2) * 100)}%` : '-';
+    if (cutoff) cutoff.textContent = hasData ? (evalParams.min_technical_score || 70.0).toFixed(1) : '-';
     if (l1Quote) {
       const l1Val = evalParams.lowest_qualified_bid_l1;
-      l1Quote.textContent = l1Val ? `₹${Number(l1Val).toLocaleString('en-IN')}` : 'INR 242,150';
+      l1Quote.textContent = l1Val ? `₹${Number(l1Val).toLocaleString('en-IN')}` : (hasData ? 'None' : '-');
     }
 
-    // Ranking Table
-    renderRankingTableOnly(rankingTable);
+    renderRankingTableOnly(rankingTable, hasData);
 
-    // Populate Fallback Bidder Select
     if (fallbackBidderSelect) {
       const qualified = rankingTable.filter(r => (r.qualification_status || r.qualification) === 'QUALIFIED');
-      fallbackBidderSelect.innerHTML = qualified.map(b => `
-        <option value="${b.bidder_id}">${b.bidder_name} (Rank ${b.rank})</option>
-      `).join('');
+      if (qualified.length === 0) {
+        fallbackBidderSelect.innerHTML = `<option value="">No qualified candidates</option>`;
+      } else {
+        fallbackBidderSelect.innerHTML = qualified.map(b => `
+          <option value="${b.bidder_id}">${b.bidder_name} (Rank ${b.rank})</option>
+        `).join('');
+      }
     }
 
-    // Recommendation Audit Trail
-    renderAuditTrail(auditTrail);
+    renderAuditTrail(auditTrail, hasData);
   }
 
-  function renderRankingTableOnly(rankingTable) {
+  function renderRankingTableOnly(rankingTable, hasData = true) {
     const tbody = document.querySelector('#rankingTable tbody');
     if (!tbody) return;
 
-    if (rankingTable.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center;">No ranking data available.</td></tr>`;
+    if (!hasData || rankingTable.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 24px;">No ranking data available. Upload bidder proposals to generate evaluation rankings.</td></tr>`;
       return;
     }
 
@@ -571,12 +614,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }).join('');
   }
 
-  function renderAuditTrail(auditTrail) {
+  function renderAuditTrail(auditTrail, hasData = true) {
     const tbody = document.querySelector('#auditTrailTable tbody');
     if (!tbody) return;
 
-    if (auditTrail.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="5" style="text-align: center;">No audit log records found.</td></tr>`;
+    if (!hasData || auditTrail.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 20px;">No audit log records recorded yet.</td></tr>`;
       return;
     }
 
@@ -618,17 +661,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!res.ok) throw new Error(`HTTP ${res.status}: Fallback failed`);
         const updated = await res.json();
 
-        // Update cached data
         if (cachedData) {
           cachedData.ranking = updated;
-          renderKPIs(cachedData);
+          renderKPIs(cachedData, true);
         }
 
-        // Re-render ranking table and audit trail
-        renderRankingTableOnly(updated.ranking_table || []);
-        renderAuditTrail(updated.audit_trail || []);
+        renderRankingTableOnly(updated.ranking_table || [], true);
+        renderAuditTrail(updated.audit_trail || [], true);
 
-        // Show alert
         if (fallbackResultAlert) {
           fallbackResultAlert.style.display = 'block';
           fallbackResultAlert.innerHTML = `
@@ -650,13 +690,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // ============================================================
   // TAB 6: RISK ANALYSIS RENDERER
   // ============================================================
-  function renderRisks(data) {
+  function renderRisks(data, hasData) {
     const risks = data.risks || [];
     const container = document.getElementById('tenderRisksList');
     if (!container) return;
 
-    if (risks.length === 0) {
-      container.innerHTML = `<div style="color: var(--text-muted); font-size: 13px;">No contractual risks detected in the baseline tender.</div>`;
+    if (!hasData || risks.length === 0) {
+      container.innerHTML = `<div style="color: var(--text-muted); font-size: 13px; text-align: center; padding: 24px;">No contractual risks analyzed. Upload tender specifications to inspect clauses.</div>`;
       return;
     }
 
@@ -726,11 +766,9 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to get answer`);
       const result = await res.json();
 
-      // Format markdown-like text to clean HTML
       const formattedAnswer = formatMarkdownToHtml(result.answer || 'No answer generated.');
       ragAnswerText.innerHTML = formattedAnswer;
 
-      // Render source citations
       const sources = result.sources || [];
       if (sources.length === 0) {
         ragSourcesContainer.innerHTML = `<div style="font-size: 12px; color: var(--text-muted);">Direct factual resolution via deterministic evaluation audit log.</div>`;
@@ -753,7 +791,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Helper: Simple Markdown to HTML formatter
   function formatMarkdownToHtml(md) {
     if (!md) return '';
     return md
@@ -766,9 +803,7 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/\n/gim, '<br>');
   }
 
-  if (btnAskRag) {
-    btnAskRag.addEventListener('click', () => submitRagQuery());
-  }
+  if (btnAskRag) btnAskRag.addEventListener('click', () => submitRagQuery());
 
   if (ragQueryInput) {
     ragQueryInput.addEventListener('keydown', (e) => {
@@ -779,7 +814,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Suggestion pill clicks
   suggestionPills.forEach(pill => {
     pill.addEventListener('click', () => {
       const q = pill.getAttribute('data-query');
@@ -791,21 +825,45 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ============================================================
+  // CLEAR DATA & RESET HANDLER
+  // ============================================================
+  if (btnClearData) {
+    btnClearData.addEventListener('click', async () => {
+      const confirmed = confirm('Are you sure you want to clear all loaded evaluation data? This will reset the dashboard to a completely fresh initial state.');
+      if (!confirmed) return;
+
+      btnClearData.disabled = true;
+      btnClearData.textContent = '⏳ Clearing...';
+
+      try {
+        const res = await fetch('/api/clear', { method: 'POST' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to clear data`);
+        await loadDashboardData();
+        alert('All evaluation data cleared! The dashboard is now in a clean initial state.');
+      } catch (err) {
+        alert(`Error clearing data: ${err.message}`);
+      } finally {
+        btnClearData.disabled = false;
+        btnClearData.textContent = '🗑️ Clear / Reset';
+      }
+    });
+  }
+
+  // ============================================================
   // SAMPLE DATASET 1-CLICK LOADER
   // ============================================================
   if (btnLoadSample) {
     btnLoadSample.addEventListener('click', async () => {
       btnLoadSample.disabled = true;
-      btnLoadSample.innerHTML = `<span>⏳ Loading BSNL Benchmark...</span>`;
+      btnLoadSample.innerHTML = `<span>⏳ Evaluating BSNL Benchmark...</span>`;
       connectionBadge.textContent = '⏳ Processing Pipeline...';
       connectionBadge.className = 'badge badge-warning';
 
       try {
         const res = await fetch('/api/load-sample', { method: 'POST' });
         if (!res.ok) throw new Error(`HTTP ${res.status}: Pipeline execution error`);
-        const result = await res.json();
 
-        alert('BSNL Benchmark Dataset loaded and multi-bidder evaluation pipeline completed successfully!');
+        alert('BSNL Benchmark Dataset loaded and evaluated successfully!');
         await loadDashboardData();
         closeDrawer();
       } catch (err) {
@@ -817,7 +875,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Refresh Button
   if (btnRefreshData) {
     btnRefreshData.addEventListener('click', () => loadDashboardData());
   }
@@ -849,9 +906,9 @@ document.addEventListener('DOMContentLoaded', () => {
       formData.append('bidder_count', 3);
 
       const bidderData = [
-        { id: 'bidder_A', name: document.getElementById('upBidderName_bidder_A')?.value || 'Shiva Construction' },
-        { id: 'bidder_B', name: document.getElementById('upBidderName_bidder_B')?.value || 'Haldwani Infra' },
-        { id: 'bidder_C', name: document.getElementById('upBidderName_bidder_C')?.value || 'Kumaon Buildcon' }
+        { id: 'bidder_A', name: document.getElementById('upBidderName_bidder_A')?.value || 'Bidder A' },
+        { id: 'bidder_B', name: document.getElementById('upBidderName_bidder_B')?.value || 'Bidder B' },
+        { id: 'bidder_C', name: document.getElementById('upBidderName_bidder_C')?.value || 'Bidder C' }
       ];
       formData.append('bidder_data_json', JSON.stringify(bidderData));
 
