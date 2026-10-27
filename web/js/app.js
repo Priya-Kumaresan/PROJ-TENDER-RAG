@@ -353,14 +353,21 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!hasData || sections.length === 0) {
         sectionsTbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 20px;">No sections detected.</td></tr>`;
       } else {
-        sectionsTbody.innerHTML = sections.map((s, idx) => `
-          <tr>
-            <td><span class="badge badge-info">§ ${idx + 1}</span></td>
-            <td><strong>${s.title || `Section ${idx + 1}`}</strong></td>
-            <td>Page ${s.start_page || s.page || 1}</td>
-            <td style="font-family: monospace; color: var(--text-muted);">${s.char_count || (s.content ? s.content.length : 0)} chars</td>
-          </tr>
-        `).join('');
+        sectionsTbody.innerHTML = sections.map((s, idx) => {
+          const secNum = s.section_number || (idx + 1);
+          const secTitle = s.section_title || s.title || `Section ${idx + 1}`;
+          const pageNum = s.start_page || s.page_number || s.page || 1;
+          const endPage = s.end_page && s.end_page !== pageNum ? `–${s.end_page}` : '';
+          const charLen = s.char_count || (s.text ? s.text.length : (s.content ? s.content.length : 0));
+          return `
+            <tr>
+              <td><span class="badge badge-info">§ ${secNum}</span></td>
+              <td><strong>${secTitle}</strong></td>
+              <td>Page ${pageNum}${endPage}</td>
+              <td style="font-family: monospace; color: var(--accent); font-weight: 500;">${Number(charLen).toLocaleString()} chars</td>
+            </tr>
+          `;
+        }).join('');
       }
     }
   }
@@ -770,7 +777,9 @@ document.addEventListener('DOMContentLoaded', () => {
     btnAskRag.disabled = true;
     btnAskRag.innerHTML = `<span>⏳ Searching Grounded Evidence...</span>`;
 
+    ragResponseCard.classList.add('active');
     ragResponseCard.classList.add('visible');
+    ragResponseCard.style.display = 'block';
     ragAnswerText.innerHTML = `<div style="color: var(--text-muted); font-size: 13px;">Analyzing tender document and evaluation audit trail...</div>`;
     ragSourcesContainer.innerHTML = '';
 
@@ -791,15 +800,21 @@ document.addEventListener('DOMContentLoaded', () => {
       if (sources.length === 0) {
         ragSourcesContainer.innerHTML = `<div style="font-size: 12px; color: var(--text-muted);">Direct factual resolution via deterministic evaluation audit log.</div>`;
       } else {
-        ragSourcesContainer.innerHTML = sources.map((s, idx) => `
-          <div class="source-card">
-            <div class="source-card-header">
-              <span class="source-title">📄 Source Document [Citation #${idx + 1}]</span>
-              <span class="badge badge-info">Page ${s.page || 1} • Similarity: ${(s.similarity_score != null ? s.similarity_score.toFixed(3) : 'Exact')}</span>
+        ragSourcesContainer.innerHTML = sources.map((s, idx) => {
+          const pageNum = s.page_number || s.page || 1;
+          const scoreText = s.similarity_score != null 
+            ? `Similarity: ${s.similarity_score.toFixed(3)}` 
+            : (s.distance != null ? `Relevance: ${Math.max(0, Math.round((1 - s.distance) * 100))}%` : 'Direct Citation');
+          return `
+            <div class="source-card">
+              <div class="source-card-header">
+                <span class="source-title">📄 Source Document [Citation #${idx + 1}] — ${s.section_title || 'Tender Section'}</span>
+                <span class="badge badge-info">Page ${pageNum} • ${scoreText}</span>
+              </div>
+              <div class="source-snippet">"${s.text || s.content || ''}"</div>
             </div>
-            <div class="source-snippet">"${s.text || s.content || ''}"</div>
-          </div>
-        `).join('');
+          `;
+        }).join('');
       }
     } catch (err) {
       ragAnswerText.innerHTML = `<div style="color: #f87171; font-size: 13px;">Error: ${err.message}</div>`;

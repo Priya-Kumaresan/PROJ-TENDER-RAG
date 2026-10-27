@@ -545,7 +545,8 @@ table.data-table tr:last-child td {
   display: none;
 }
 
-.chat-response-card.active {
+.chat-response-card.active,
+.chat-response-card.visible {
   display: block;
 }
 

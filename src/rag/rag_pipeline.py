@@ -112,6 +112,142 @@ def _check_evaluation_query(question: str, tender_id: str = "tender_001"):
     return None
 
 
+def _check_tender_field_query(question: str, tender_id: str = "tender_001"):
+    """
+    Checks if question is asking for extracted tender specifications (completion period,
+    EMD, performance security, tender number, estimated value, etc.).
+    """
+    t_path = Path(f"data/processed/{tender_id}/tender.json")
+    if not t_path.exists():
+        return None
+
+    try:
+        with open(t_path, "r", encoding="utf-8") as f:
+            t_data = json.load(f)
+    except Exception:
+        return None
+
+    fields = t_data.get("tender_fields", {})
+    if not fields:
+        return None
+
+    q_low = question.lower()
+
+    # 1. Completion Period / Schedule / Duration
+    if any(k in q_low for k in ["completion", "schedule", "time allowed", "months", "duration", "how long"]):
+        f_info = fields.get("completion_period", {})
+        val = f_info.get("value", "N/A")
+        page = f_info.get("page", 4)
+        evidence = f_info.get("evidence", "time allowed for carrying out the work")
+        ans = (
+            f"### ⏱️ Mandatory Completion Schedule\n\n"
+            f"• **Specified Completion Period:** **{val}**\n"
+            f"• **Document Citation:** Page {page} of the Tender Document\n"
+            f"• **Verbatim Clause Excerpt:** *\"{evidence}\"*\n\n"
+            f"**Procurement Impact:** This schedule is a mandatory qualification criterion. Any vendor proposing a schedule exceeding {val} is non-compliant and disqualified."
+        )
+        source_info = [{
+            "rank": 1,
+            "section_number": "NIT Clause 2",
+            "section_title": "Completion Schedule & Time Allowed",
+            "page_number": page,
+            "text": evidence,
+            "distance": 0.0
+        }]
+        return {"question": question, "answer": ans, "sources": source_info}
+
+    # 2. Earnest Money Deposit (EMD) / Bid Security
+    if any(k in q_low for k in ["emd", "earnest money", "deposit", "bid security"]):
+        f_info = fields.get("emd", {})
+        val = f_info.get("value", "N/A")
+        page = f_info.get("page", 4)
+        evidence = f_info.get("evidence", "Earnest Money deposit")
+        ans = (
+            f"### 💰 Earnest Money Deposit (EMD) Requirement\n\n"
+            f"• **Required EMD Amount:** **{val}**\n"
+            f"• **Document Citation:** Page {page} of the Tender Document\n"
+            f"• **Verbatim Clause Excerpt:** *\"{evidence}\"*\n\n"
+            f"**Compliance Protocol:** The bidder must furnish bid security in the exact approved instrument format prior to bid submission closing."
+        )
+        source_info = [{
+            "rank": 1,
+            "section_number": "NIT Clause 4",
+            "section_title": "Earnest Money Deposit (EMD)",
+            "page_number": page,
+            "text": evidence,
+            "distance": 0.0
+        }]
+        return {"question": question, "answer": ans, "sources": source_info}
+
+    # 3. Performance Security / Guarantee
+    if any(k in q_low for k in ["performance security", "performance guarantee", "security deposit", "guarantee"]):
+        f_info = fields.get("performance_security", {})
+        val = f_info.get("value", "N/A")
+        page = f_info.get("page", 7)
+        evidence = f_info.get("evidence", "Performance Guarantee")
+        ans = (
+            f"### 🛡️ Performance Guarantee Requirement\n\n"
+            f"• **Performance Security Rate:** **{val} of Contract Value**\n"
+            f"• **Document Citation:** Page {page} of the Tender Document\n"
+            f"• **Verbatim Clause Excerpt:** *\"{evidence}\"*\n\n"
+            f"**Requirement:** Must be submitted by the successful Rank 1 bidder within 15 days of letter of acceptance before signing the agreement."
+        )
+        source_info = [{
+            "rank": 1,
+            "section_number": "Clause 1",
+            "section_title": "Performance Security & Contract Guarantee",
+            "page_number": page,
+            "text": evidence,
+            "distance": 0.0
+        }]
+        return {"question": question, "answer": ans, "sources": source_info}
+
+    # 4. Estimated Cost / Project Value
+    if any(k in q_low for k in ["estimated cost", "estimated value", "project cost", "budget", "cost"]):
+        f_info = fields.get("estimated_value", {})
+        val = f_info.get("value", "N/A")
+        page = f_info.get("page", 38)
+        evidence = f_info.get("evidence", "Estimated Cost")
+        ans = (
+            f"### 📊 Estimated Project Value\n\n"
+            f"• **Estimated Value:** **INR {val}**\n"
+            f"• **Document Citation:** Page {page} (Schedule of Quantities)\n"
+            f"• **Verbatim Clause Excerpt:** *\"{evidence}\"*"
+        )
+        source_info = [{
+            "rank": 1,
+            "section_number": "BOQ",
+            "section_title": "Estimated Project Cost",
+            "page_number": page,
+            "text": evidence,
+            "distance": 0.0
+        }]
+        return {"question": question, "answer": ans, "sources": source_info}
+
+    # 5. Tender Number / Identifier
+    if any(k in q_low for k in ["tender number", "tender id", "nit no", "nit number", "identifier"]):
+        f_info = fields.get("tender_number", {})
+        val = f_info.get("value", "N/A")
+        page = f_info.get("page", 1)
+        evidence = f_info.get("evidence", val)
+        ans = (
+            f"### 📑 Tender Identifier\n\n"
+            f"• **Official Tender / NIT Number:** **{val}**\n"
+            f"• **Citation:** Page {page} of Tender Document"
+        )
+        source_info = [{
+            "rank": 1,
+            "section_number": "Header",
+            "section_title": "Tender Notice Identifier",
+            "page_number": page,
+            "text": evidence,
+            "distance": 0.0
+        }]
+        return {"question": question, "answer": ans, "sources": source_info}
+
+    return None
+
+
 def answer_question(
     question,
     tender_id="tender_001",
@@ -124,7 +260,7 @@ def answer_question(
     if not question or not question.strip():
         return {
             "question": question,
-            "answer": "Please enter a question.",
+            "answer": "Please enter a question regarding the tender or bidder evaluation.",
             "sources": []
         }
 
@@ -133,7 +269,12 @@ def answer_question(
     if eval_result is not None:
         return eval_result
 
-    # 2. Otherwise query the Tender document vector store
+    # 2. Check if the query matches extracted tender baseline specifications
+    field_result = _check_tender_field_query(question, tender_id=tender_id)
+    if field_result is not None:
+        return field_result
+
+    # 3. Otherwise query the Tender document vector store
     retriever = TenderRetriever()
     retrieved_chunks = retriever.retrieve(
         question,
