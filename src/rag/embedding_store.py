@@ -121,21 +121,81 @@ class TenderVectorStore:
             except Exception:
                 pass
 
-        # Fallback lexical / BM25 term overlap search
-        q_tokens = set(re.findall(r"\w+", query.lower()))
+        # Enhanced lexical & semantic similarity search across Tender, Bidder, and Evaluation chunks
+        q_low = query.lower()
+        stopwords = {
+            "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are",
+            "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but",
+            "by", "can", "did", "do", "does", "doing", "don", "down", "during", "each", "few", "for",
+            "from", "further", "had", "has", "have", "having", "he", "her", "here", "hers", "herself",
+            "him", "himself", "his", "how", "i", "if", "in", "into", "is", "it", "its", "itself", "just",
+            "me", "more", "most", "my", "myself", "no", "nor", "not", "now", "of", "off", "on", "once",
+            "only", "or", "other", "our", "ours", "ourselves", "out", "over", "own", "s", "same", "she",
+            "should", "so", "some", "such", "t", "than", "that", "the", "their", "theirs", "them",
+            "themselves", "then", "there", "these", "they", "this", "those", "through", "to", "too",
+            "under", "until", "up", "very", "was", "we", "were", "what", "when", "where", "which",
+            "while", "who", "whom", "why", "will", "with", "you", "your", "yours", "yourself"
+        }
+
+        raw_tokens = re.findall(r"\w+", q_low)
+        q_tokens = [t for t in raw_tokens if t not in stopwords and len(t) > 1]
+        if not q_tokens:
+            q_tokens = [t for t in raw_tokens if len(t) > 1]
+
         scored = []
 
         for chunk in self.fallback_chunks:
             c_text = chunk.get("text", "")
-            c_tokens = re.findall(r"\w+", c_text.lower())
+            c_text_low = c_text.lower()
+            c_title = (chunk.get("section_title") or "").lower()
+            c_sec = (chunk.get("section_number") or "").lower()
+
+            c_tokens = set(re.findall(r"\w+", c_text_low))
             if not c_tokens:
                 continue
 
-            # Token overlap score
+            score = 0.0
+
+            # 1. Exact phrase match
+            if len(q_low) > 4 and q_low in c_text_low:
+                score += 8.0
+
+            # 2. Section title and number relevance
+            for t in q_tokens:
+                if t in c_title:
+                    score += 3.5
+                if t in c_sec:
+                    score += 2.5
+
+            # 3. Intent-specific routing boosts
+            if any(k in q_low for k in ["worst", "disqualif", "fail", "reject", "non-compliant", "bad"]):
+                if "eval-disqualified" in c_sec or "disqualif" in c_title or "worst" in c_text_low:
+                    score += 15.0
+
+            if any(k in q_low for k in ["recommend", "winner", "win", "best", "rank 1", "highest score"]):
+                if "eval-recommendation" in c_sec or "eval-ranking" in c_sec or "recommended" in c_title:
+                    score += 15.0
+
+            if any(k in q_low for k in ["rank", "ranking", "qcbs", "overall score", "table"]):
+                if "eval-ranking" in c_sec or "ranking" in c_title:
+                    score += 12.0
+
+            if any(k in q_low for k in ["turnover", "experience", "compare", "comparison", "difference", "machinery", "equipment"]):
+                if "eval-comparison" in c_sec or "tech" in c_sec or "comparison" in c_title:
+                    score += 10.0
+
+            # Specific bidder boosts
+            for b_kw in ["shiva", "haldwani", "kumaon"]:
+                if b_kw in q_low and b_kw in c_text_low:
+                    score += 6.0
+
+            # 4. Token overlap score
             overlap = sum(1 for t in q_tokens if t in c_tokens)
-            score = overlap / (math.sqrt(len(c_tokens)) + 1e-5)
-            # Distance inversely proportional to score
-            distance = round(1.0 / (score + 1.0), 4)
+            score += overlap * 2.0
+
+            # Normalize slightly by length
+            normalized_score = score / (math.log(len(c_text_low) + 10) + 1.0)
+            distance = round(1.0 / (normalized_score + 1.0), 4)
 
             metadata = {
                 "tender_id": chunk.get("tender_id", "tender_001"),
@@ -144,7 +204,7 @@ class TenderVectorStore:
                 "page_number": chunk.get("page_number", 1),
                 "chunk_index": chunk.get("chunk_index", 1)
             }
-            scored.append((score, distance, c_text, metadata))
+            scored.append((normalized_score, distance, c_text, metadata))
 
         scored.sort(key=lambda x: x[0], reverse=True)
         top_matches = scored[:top_k]

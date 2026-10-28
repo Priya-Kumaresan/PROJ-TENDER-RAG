@@ -281,6 +281,69 @@ with open(comparison_output, "w", encoding="utf-8") as file:
     json.dump(comparison_result, file, indent=4, ensure_ascii=False)
 
 # ============================================================
+# INDEX UNIFIED MULTI-PILLAR KNOWLEDGE INTO RAG VECTOR STORE
+# ============================================================
+print("\nIndexing Unified Knowledge (Tender, Bidders, Evaluation) into RAG Vector Store...")
+try:
+    from src.rag.chunker import create_tender_boq_chunks, create_bidder_chunks, create_evaluation_chunks
+    from src.rag.embedding_store import TenderVectorStore
+
+    all_knowledge_chunks = list(tender_data.get("rag_chunks", []))
+
+    # 1. Tender BOQ chunks
+    tender_boq_json_path = OUTPUT_FOLDER / "tender_boq.json"
+    if tender_boq_json_path.exists():
+        with open(tender_boq_json_path, "r", encoding="utf-8") as f:
+            t_boq_data = json.load(f)
+        all_knowledge_chunks.extend(create_tender_boq_chunks(t_boq_data, tender_id="tender_001"))
+
+    # 2. Bidder Technical, Financial, and BOQ Chunks
+    try:
+        import pypdf
+    except ImportError:
+        pypdf = None
+
+    for b in all_bidders_data:
+        b_id = b.get("bidder_id")
+        b_name = b.get("bidder_name")
+        pdf_texts = {}
+        if pypdf:
+            b_folder = RAW_FOLDER / b_id
+            for pdf_f in ["Technical_Bid.pdf", "Financial_Bid.pdf"]:
+                p_path = b_folder / pdf_f
+                if p_path.exists():
+                    try:
+                        reader = pypdf.PdfReader(str(p_path))
+                        pdf_texts[pdf_f] = "\n".join([pg.extract_text() or "" for pg in reader.pages])
+                    except Exception:
+                        pass
+        b_chunks = create_bidder_chunks(
+            bidder_id=b_id,
+            bidder_name=b_name,
+            raw_pdf_texts=pdf_texts,
+            bidder_fields=b.get("bidder_fields"),
+            boq_items=b.get("boq_validation"),
+            tender_id="tender_001"
+        )
+        all_knowledge_chunks.extend(b_chunks)
+
+    # 3. Evaluation & Ranking Chunks
+    eval_chunks = create_evaluation_chunks(
+        ranking_result=ranking_result,
+        comparison_result=comparison_result,
+        tender_id="tender_001"
+    )
+    all_knowledge_chunks.extend(eval_chunks)
+
+    # Reset and store unified knowledge base
+    v_store = TenderVectorStore()
+    v_store.delete(where={"tender_id": "tender_001"})
+    v_store.add_chunks(all_knowledge_chunks)
+    print(f"RAG Vector Database successfully updated with {len(all_knowledge_chunks)} unified chunks across all 3 pillars.")
+except Exception as e:
+    print(f"Warning updating vector store: {e}")
+
+# ============================================================
 # DISPLAY SUMMARY
 # ============================================================
 

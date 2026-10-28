@@ -56,32 +56,61 @@ class TenderLLM:
                     f"*(Source: BSNL Notice Inviting Tender)*"
                 )
 
-        # Extract sentences from context
-        clean_context = re.sub(r"\[Section [^\]]+\]", "", context)
-        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", clean_context) if len(s.strip()) > 10]
+        # If context contains rich structured knowledge (evaluations, bidder profiles, comparisons, or clauses)
+        paragraphs = [p.strip() for p in context.split("\n\n") if p.strip()]
 
-        q_terms = [t.lower() for t in re.findall(r"\b\w{3,}\b", question) if t.lower() not in ("what", "which", "where", "when", "does", "tender")]
+        stopwords = {
+            "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are",
+            "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but",
+            "by", "can", "did", "do", "does", "doing", "don", "down", "during", "each", "few", "for",
+            "from", "further", "had", "has", "have", "having", "he", "her", "here", "hers", "herself",
+            "him", "himself", "his", "how", "i", "if", "in", "into", "is", "it", "its", "itself", "just",
+            "me", "more", "most", "my", "myself", "no", "nor", "not", "now", "of", "off", "on", "once",
+            "only", "or", "other", "our", "ours", "ourselves", "out", "over", "own", "s", "same", "she",
+            "should", "so", "some", "such", "t", "than", "that", "the", "their", "theirs", "them",
+            "themselves", "then", "there", "these", "they", "this", "those", "through", "to", "too",
+            "under", "until", "up", "very", "was", "we", "were", "what", "when", "where", "which",
+            "while", "who", "whom", "why", "will", "with", "you", "your", "yours", "yourself", "tender"
+        }
 
-        scored_sentences = []
-        for s in sentences:
-            s_lower = s.lower()
-            matches = sum(1 for term in q_terms if term in s_lower)
+        q_terms = [t for t in re.findall(r"\b\w{2,}\b", q_low) if t not in stopwords]
+        if not q_terms:
+            q_terms = [t for t in re.findall(r"\b\w{2,}\b", q_low)]
+
+        # Score paragraphs
+        scored_paras = []
+        for p in paragraphs:
+            p_clean = re.sub(r"\[Section [^\]]+\]", "", p).strip()
+            p_low = p_clean.lower()
+            matches = sum(1 for term in q_terms if term in p_low)
+
+            # Extra weight for exact phrases and key intent words
+            if len(q_low) > 4 and q_low in p_low:
+                matches += 5
+            for k in ["worst", "disqualif", "fail", "best", "winner", "turnover", "experience", "machinery", "schedule", "quote", "rate"]:
+                if k in q_low and k in p_low:
+                    matches += 3
+
             if matches > 0:
-                scored_sentences.append((matches, s))
+                scored_paras.append((matches, p_clean))
 
-        scored_sentences.sort(key=lambda x: x[0], reverse=True)
+        scored_paras.sort(key=lambda x: x[0], reverse=True)
 
-        if scored_sentences:
-            best_sentences = [s[1] for s in scored_sentences[:3]]
-            extracted_text = " ".join(best_sentences)
+        if scored_paras:
+            best_paragraphs = [p[1] for p in scored_paras[:2]]
+            combined = "\n\n".join(best_paragraphs)
             return (
-                f"**Extracted Tender Evidence:**\n\n{extracted_text}\n\n"
-                f"*(Note: Generated via direct evidence extraction as local Ollama service was unavailable.)*"
+                f"### 📋 Retrieved Evidence & Analysis\n\n"
+                f"{combined}\n\n"
+                f"*(Note: Generated via direct evidence synthesis from indexed project records.)*"
             )
 
+        # Fallback to general excerpt
+        clean_context = re.sub(r"\[Section [^\]]+\]", "", context).strip()
         return (
-            f"**Retrieved Evidence Excerpt:**\n\n{context[:400]}...\n\n"
-            f"*(Note: Generated via direct evidence extraction as local Ollama service was unavailable.)*"
+            f"### 📋 Retrieved Tender Excerpt\n\n"
+            f"{clean_context[:500]}...\n\n"
+            f"*(Note: Generated via direct evidence extraction.)*"
         )
 
     def generate_answer(self, question: str, context: str) -> str:

@@ -8,6 +8,11 @@ except ImportError:
     except ImportError:
         pymupdf = None
 
+try:
+    import pypdf
+except ImportError:
+    pypdf = None
+
 from src.extraction.text_processor import (
     clean_text,
     check_text_quality
@@ -27,69 +32,84 @@ def extract_pdf(pdf_path):
     text appears unreadable.
     """
     pdf_path = Path(pdf_path)
-    if pymupdf is None:
+    if pymupdf is None and pypdf is None:
         raise ImportError(
-            "PyMuPDF is not installed in the active Python environment. "
-            "Please install with: pip install pymupdf"
+            "Neither PyMuPDF nor pypdf is installed in the active Python environment. "
+            "Please install with: pip install pypdf"
         )
-
-    document = pymupdf.open(pdf_path)
 
     pages = []
 
-    for page_index in range(len(document)):
-        page = document[page_index]
+    if pymupdf is not None:
+        document = pymupdf.open(pdf_path)
+        total_pages = len(document)
 
-        # 1. Direct extraction
-        raw_text = page.get_text("text")
+        for page_index in range(total_pages):
+            page = document[page_index]
+            raw_text = page.get_text("text")
+            quality = check_text_quality(raw_text)
 
-        quality = check_text_quality(raw_text)
+            if quality["is_readable"]:
+                final_text = raw_text
+                extraction_method = "direct"
+                ocr_used = False
+            else:
+                print(f"Page {page_index + 1}: poor text detected -> running OCR")
+                ocr_text = ocr_page(page)
+                final_text = ocr_text
+                extraction_method = "ocr"
+                ocr_used = True
 
-        # 2. Decide extraction method
-        if quality["is_readable"]:
-            final_text = raw_text
-            extraction_method = "direct"
-            ocr_used = False
-        else:
-            print(f"Page {page_index + 1}: poor text detected -> running OCR")
-            ocr_text = ocr_page(page)
-            final_text = ocr_text
-            extraction_method = "ocr"
-            ocr_used = True
+            cleaned_text = clean_text(final_text)
+            final_quality = check_text_quality(cleaned_text)
 
-        # 3. Clean final text
-        cleaned_text = clean_text(final_text)
+            if ocr_used and final_quality["is_readable"]:
+                quality_reason = "OCR extraction successful"
+            elif ocr_used:
+                quality_reason = "OCR completed but text quality remains poor"
+            else:
+                quality_reason = final_quality["reason"]
 
-        # 4. Check final quality
-        final_quality = check_text_quality(cleaned_text)
+            page_data = {
+                "page_number": page_index + 1,
+                "raw_text": raw_text.strip(),
+                "cleaned_text": cleaned_text,
+                "character_count": len(cleaned_text),
+                "is_readable": final_quality["is_readable"],
+                "quality_reason": quality_reason,
+                "ocr_required": not quality["is_readable"],
+                "ocr_used": ocr_used,
+                "extraction_method": extraction_method
+            }
+            pages.append(page_data)
 
-        # 5. Store page
-        if ocr_used and final_quality["is_readable"]:
-            quality_reason = "OCR extraction successful"
-        elif ocr_used:
-            quality_reason = "OCR completed but text quality remains poor"
-        else:
-            quality_reason = final_quality["reason"]
+        document.close()
+    else:
+        # Fallback to pure-python pypdf
+        reader = pypdf.PdfReader(str(pdf_path))
+        total_pages = len(reader.pages)
 
-        page_data = {
-            "page_number": page_index + 1,
-            "raw_text": raw_text.strip(),
-            "cleaned_text": cleaned_text,
-            "character_count": len(cleaned_text),
-            "is_readable": final_quality["is_readable"],
-            "quality_reason": quality_reason,
-            "ocr_required": not quality["is_readable"],
-            "ocr_used": ocr_used,
-            "extraction_method": extraction_method
-        }
+        for page_index in range(total_pages):
+            page = reader.pages[page_index]
+            raw_text = page.extract_text() or ""
+            cleaned_text = clean_text(raw_text)
+            final_quality = check_text_quality(cleaned_text)
 
-        pages.append(page_data)
+            page_data = {
+                "page_number": page_index + 1,
+                "raw_text": raw_text.strip(),
+                "cleaned_text": cleaned_text,
+                "character_count": len(cleaned_text),
+                "is_readable": final_quality["is_readable"],
+                "quality_reason": final_quality["reason"],
+                "ocr_required": False,
+                "ocr_used": False,
+                "extraction_method": "pypdf_direct"
+            }
+            pages.append(page_data)
 
-    result = {
+    return {
         "file_name": pdf_path.name,
-        "total_pages": len(document),
+        "total_pages": total_pages,
         "pages": pages
     }
-
-    document.close()
-    return result
