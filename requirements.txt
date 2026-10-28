@@ -1,9 +1,11 @@
-pymupdf
-pandas
+fastapi
+uvicorn
+pydantic
+pypdf
 openpyxl
-pytesseract
+xlrd
+pandas
 pillow
 sentence-transformers
 chromadb
 ollama
-streamlit
